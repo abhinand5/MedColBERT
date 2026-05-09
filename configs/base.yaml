@@ -1,0 +1,15 @@
+# MedColBERT-base configuration
+# 150M parameter model
+
+model: thomas-sounack/BioClinical-ModernBERT-base
+colbert_dim: 128
+attend_to_mask: false
+
+query_maxlen: 64
+doc_maxlen: 512
+max_length: 8192  # backbone supports up to 8192
+
+mrl:
+  enabled: true
+  dims: [32, 64, 128]
+  weights: [0.1, 0.2, 0.7]
