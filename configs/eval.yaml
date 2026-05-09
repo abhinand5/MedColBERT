@@ -1,0 +1,108 @@
+# Evaluation defaults.
+
+model_dir: checkpoints/base
+index_dir: indexes/base
+run_dir: runs/eval
+
+benchmarks:
+  nfcorpus:
+    enabled: true
+    tier: primary_biomedical
+    query_mode: default
+  trec_covid:
+    enabled: true
+    tier: primary_biomedical
+    train_contamination_block: true
+    query_mode: default
+  bioasq:
+    enabled: true
+    tier: primary_biomedical
+    strict_split_control: true
+    query_mode: biomedical
+  scifact:
+    enabled: true
+    tier: primary_biomedical
+    query_mode: biomedical
+  trec_clinical_trials:
+    enabled: true
+    tier: primary_clinical
+    query_mode: long_clinical
+  r2med:
+    enabled: true
+    tier: primary_reasoning
+    hf_dataset: R2MED/PMC-Treatment
+    query_mode: biomedical
+  pmc_patients:
+    enabled: true
+    tier: primary_clinical
+    hf_dataset: zhengyun21/PMC-Patients
+    license_note: cc-by-nc-sa-4.0
+    query_mode: long_clinical
+  cliniq:
+    enabled: false
+    tier: optional_clinical_access
+    query_mode: long_clinical
+  mirage:
+    enabled: false
+    tier: downstream_rag
+    query_mode: biomedical
+  medrgb:
+    enabled: false
+    tier: downstream_rag
+    query_mode: biomedical
+
+metrics:
+  - ndcg@10
+  - recall@100
+  - recall@1000
+  - map@10
+
+baselines:
+  sparse:
+    - bm25
+    - bm25_rm3
+  general_dense:
+    - bge
+    - e5
+    - gte
+    - nv_embed
+  biomedical_dense:
+    - medcpt
+    - bmr_retriever
+    - medembed
+  late_interaction:
+    - generic_colbert
+    - bioclinical_colbert_no_umls
+  rerankers:
+    - medcpt_cross_encoder
+    - bioclinical_cross_encoder
+
+vocab_split:
+  enabled: true
+  buckets:
+    - same_vocab
+    - lay_to_clinical
+    - abbreviation_to_expanded
+    - brand_generic
+    - symptom_to_diagnosis_or_treatment
+    - no_direct_lexical_overlap
+
+efficiency:
+  report_index_size: true
+  report_query_latency: true
+  report_encoding_throughput: true
+  mrl_dims:
+    - 32
+    - 64
+    - 128
+
+length_modes:
+  default:
+    query_maxlen: 64
+    doc_maxlen: 256
+  biomedical:
+    query_maxlen: 96
+    doc_maxlen: 256
+  long_clinical:
+    query_maxlen: 1024
+    doc_maxlen: 512

@@ -1,0 +1,71 @@
+# Data construction defaults.
+# UMLS-derived outputs are private by default and should not be published.
+
+umls:
+  source: local
+  local_dir: data/raw/umls
+  private_hf_repo: null
+  required_files:
+    - MRCONSO.RRF
+    - MRREL.RRF
+    - MRSTY.RRF
+  optional_files:
+    - MRDEF.RRF
+
+outputs:
+  private_dir: data/processed/private
+  public_dir: data/processed/public
+
+filters:
+  language: ENG
+  suppress: N
+  min_string_chars: 3
+  max_string_chars: 160
+  max_cuis_per_normalized_string: 3
+  allow_abbreviations_only_if_unambiguous: true
+
+vocab_groups:
+  consumer:
+    - CHV
+  clinical:
+    - SNOMEDCT_US
+    - ICD10CM
+    - ICD9CM
+    - MSH
+    - NCI
+  drug:
+    - RXNORM
+    - VANDF
+
+relations:
+  hierarchical:
+    - PAR
+    - CHD
+    - RB
+    - RN
+  related:
+    - RO
+    - RQ
+
+passages:
+  min_chars: 80
+  max_tokens: 384
+  overlap_tokens: 64
+  sources:
+    pubmed: data/raw/pubmed
+    pmc: data/raw/pmc
+    medembed: data/raw/medembed
+
+decontamination:
+  enabled: true
+  minhash_threshold: 0.8
+  num_perm: 128
+  id_fields:
+    - pmid
+    - pmcid
+    - nct_id
+
+triplets:
+  pilot_limit: 100000
+  target_v1_limit: 2000000
+  random_seed: 42

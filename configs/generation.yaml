@@ -1,0 +1,39 @@
+# DSPy synthetic query generation defaults.
+
+dspy:
+  lm: openai/local-med-generator
+  api_base: http://localhost:8000/v1
+  api_key_env: OPENAI_API_KEY
+  temperature: 0.7
+  max_tokens: 256
+  cache: true
+  num_retries: 3
+
+roles:
+  physician: 0.25
+  patient: 0.30
+  researcher: 0.20
+  nurse: 0.15
+  student: 0.10
+
+generation:
+  batch_size: 64
+  pilot_limit: 1000
+  production_shard_size: 100000
+  min_query_chars: 5
+  max_query_chars: 180
+  max_passage_chars: 1800
+  require_target_cui: true
+  keep_debug_rationale_private: true
+
+validators:
+  max_forbidden_surface_overlap: 0.25
+  min_alternative_term_count: 1
+  reject_generic_queries: true
+  reject_near_duplicates: true
+  minhash_threshold: 0.86
+
+audit:
+  sample_per_role: 100
+  sample_per_semantic_group: 100
+  minimum_acceptance_rate: 0.80

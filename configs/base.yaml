@@ -6,8 +6,12 @@ colbert_dim: 128
 attend_to_mask: false
 
 query_maxlen: 64
-doc_maxlen: 512
-max_length: 8192  # backbone supports up to 8192
+biomed_query_maxlen: 96
+clinical_query_maxlen: 512
+long_query_maxlen: 1024
+doc_maxlen: 256
+long_doc_maxlen: 512
+backbone_max_length: 8192  # encoder supports this; ColBERT indexing should stay chunked
 
 mrl:
   enabled: true

@@ -209,3 +209,7 @@ __marimo__/
 # Data files (large, download separately)
 data/raw/
 data/processed/
+checkpoints/
+indexes/
+runs/
+outputs/

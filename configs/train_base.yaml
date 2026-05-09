@@ -1,0 +1,54 @@
+# Base-model training defaults. Tune after the smoke test.
+
+model_config: configs/base.yaml
+framework: pylate
+
+stage0_smoke:
+  enabled: true
+  max_examples: 1000
+  max_steps: 1000
+
+stage1_concept_warmup:
+  enabled: true
+  train_path: data/processed/private/umls_pairs.parquet
+  max_steps: 20000
+  learning_rate: 0.00003
+  per_device_train_batch_size: 64
+  gradient_accumulation_steps: 4
+  bf16: true
+
+stage2_colbert:
+  enabled: true
+  train_path: data/processed/private/triplets_v1.parquet
+  eval_path: data/processed/private/triplets_dev.parquet
+  max_steps: 100000
+  learning_rate: 0.00001
+  warmup_ratio: 0.03
+  per_device_train_batch_size: 16
+  gradient_accumulation_steps: 16
+  bf16: true
+  gradient_checkpointing: true
+  gather_across_devices: true
+
+negative_sampling:
+  bm25: 1
+  concept_near: 1
+  dense_mined: 1
+  random_same_semantic_group: 1
+
+mrl:
+  enabled: true
+  dims:
+    - 32
+    - 64
+    - 128
+  weights:
+    - 0.1
+    - 0.2
+    - 0.7
+
+outputs:
+  checkpoint_dir: checkpoints/base
+  run_dir: runs/base
+  save_steps: 10000
+  eval_steps: 5000
