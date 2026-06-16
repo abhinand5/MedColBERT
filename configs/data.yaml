@@ -54,7 +54,47 @@ passages:
   sources:
     pubmed: data/raw/pubmed
     pmc: data/raw/pmc
-    medembed: data/raw/medembed
+    bioasq: data/raw/bioasq
+    trec: data/raw/trec
+    clinical_trials: data/raw/clinical_trials
+    medembed_legacy: data/raw/medembed
+
+training_sources:
+  qrel_backed:
+    enabled: true
+    target_examples: 300000
+    weight: 2.0
+    sources:
+      - bioasq
+      - trec
+  citation_context:
+    enabled: true
+    target_examples: 900000
+    weight: 1.5
+    source: pmc
+  clinical_trials_synthetic:
+    enabled: true
+    target_examples: 400000
+    weight: 1.5
+    source: clinical_trials
+  umls_concept_synthetic:
+    enabled: true
+    target_examples: 2000000
+    weight: 1.75
+    note: "Main scaling lever: passage-grounded, UMLS-grounded, teacher-filtered synthetic triplets."
+  medembed_legacy:
+    enabled: false
+    max_examples: 100000
+    weight: 0.25
+    note: "Use only for continuity ablations or a low-weight warm start; not a quality anchor."
+
+quality_gates:
+  require_teacher_margin: true
+  minimum_teacher_margin: 0.15
+  audit_acceptance_threshold: 0.8
+  max_medembed_fraction: 0.05
+  compare_synthetic_modes: true
+  preferred_synthetic_mode: umls_grounded_teacher_filtered
 
 decontamination:
   enabled: true
@@ -67,5 +107,8 @@ decontamination:
 
 triplets:
   pilot_limit: 100000
-  target_v1_limit: 2000000
+  target_v1_limit: 3000000
+  target_umls_grounded_synthetic_fraction:
+    min: 0.40
+    max: 0.55
   random_seed: 42

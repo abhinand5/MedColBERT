@@ -109,10 +109,12 @@ Build retrievable passages grounded to UMLS CUIs.
 ### Abhinand Requirements
 
 - Decide initial passage sources:
-  - recommended first: MedEmbed data and PubMed abstracts.
-  - later: PMC OA.
+  - recommended first: PubMed abstracts, PMC citation contexts, and BioASQ/TREC
+    qrel-backed corpora.
+  - later: PMC OA full paragraphs and ClinicalTrials.gov.
+  - MedEmbed should be low-weight legacy/ablation data only, not the main source.
   - defer: MIMIC unless credentialing and privacy constraints are already solved.
-- Provide MedEmbed data location if it should be used.
+- Provide MedEmbed data location only if it should be used for a continuity ablation.
 - Approve chunking defaults.
 
 ### Agent Tasks
@@ -126,7 +128,11 @@ Build retrievable passages grounded to UMLS CUIs.
   - `metadata`
   - `cuis`
   - `matched_spans`
-- Ingest MedEmbed/PubMed/PMC into this schema.
+- Ingest PubMed/PMC/BioASQ/TREC/ClinicalTrials.gov into this schema.
+- Add citation-context extraction for PMC:
+  - citation sentence/paragraph as query-like text.
+  - cited article title/abstract/passage as positive.
+- Treat MedEmbed as optional low-weight legacy data.
 - Chunk long documents into 256-384 token passages with overlap.
 - Build a UMLS dictionary matcher for passage annotation.
 - Store `passage_id -> CUIs` privately.
@@ -146,11 +152,12 @@ Build retrievable passages grounded to UMLS CUIs.
 
 ---
 
-## Phase 3: DSPy Synthetic Query Pilot
+## Phase 3: UMLS-Grounded DSPy Synthetic Query Pilot
 
 ### Goal
 
-Generate a small, high-quality synthetic query set before scaling.
+Generate a small, high-quality UMLS-grounded synthetic query set before scaling. This
+is expected to become the main scaling lever, not a side source.
 
 ### Abhinand Requirements
 
@@ -163,6 +170,8 @@ Generate a small, high-quality synthetic query set before scaling.
 ### Agent Tasks
 
 - Implement DSPy signatures/modules for medical query generation.
+- Use UMLS target CUIs, source vocabulary groups, and alternative terms as explicit
+  inputs to every generation call.
 - Add deterministic validators:
   - query length.
   - target CUI coverage.
@@ -170,6 +179,7 @@ Generate a small, high-quality synthetic query set before scaling.
   - near-duplicate detection.
   - generic-query rejection.
   - passage answerability.
+- Add teacher/reranker scoring once the first candidate pool exists.
 - Generate the first 1k examples.
 - Produce audit files with:
   - passage.
@@ -179,6 +189,11 @@ Generate a small, high-quality synthetic query set before scaling.
   - validation outcomes.
   - rejection reason if any.
 - Iterate DSPy prompt/program based on audit.
+- Compare generation modes:
+  - unconstrained synthetic.
+  - passage-grounded synthetic.
+  - UMLS-grounded synthetic.
+  - UMLS-grounded plus teacher-filtered synthetic.
 - Scale only to 50k-100k pilot examples after passing audit.
 
 ### Requirements
@@ -194,6 +209,7 @@ Generate a small, high-quality synthetic query set before scaling.
 - 80%+ manual acceptance.
 - Query target CUIs match passage CUIs.
 - Queries show real vocabulary shift rather than passage copying.
+- UMLS-grounded synthetic clearly beats unconstrained synthetic in audit quality.
 
 ---
 
@@ -212,6 +228,9 @@ Produce train/dev triplets with multiple negative types.
 ### Agent Tasks
 
 - Build positives from query target CUIs and passage-CUI annotations.
+- Build qrel-backed positives from BioASQ/TREC when available.
+- Build citation-context positives from PMC references.
+- Build clinical-trial positives from trial records and generated patient vignettes.
 - Mine BM25 negatives.
 - Build UMLS concept-near negatives:
   - parent/child.
@@ -234,6 +253,12 @@ Produce train/dev triplets with multiple negative types.
 ### Exit Criteria
 
 - 50k-100k pilot triplets.
+- Pilot composition is mixed and audited:
+  - qrel-backed examples.
+  - citation-context examples.
+  - UMLS-grounded DSPy examples as the largest pilot bucket if audit quality is good.
+  - concept-near negatives.
+  - little or no MedEmbed.
 - Each triplet has source and negative-type metadata.
 - False-negative rate is acceptable in manual audit.
 - No known eval leakage.
@@ -331,7 +356,8 @@ Decide whether the core paper hypothesis is alive.
 
 ### Goal
 
-Train a serious base model with 1M-2M high-quality triplets.
+Train a serious base model with 2M-3M audited triplets, led by UMLS-grounded synthetic
+examples if the pilot validates their quality.
 
 ### Abhinand Requirements
 
@@ -341,7 +367,8 @@ Train a serious base model with 1M-2M high-quality triplets.
 
 ### Agent Tasks
 
-- Generate 1M-2M validated triplets.
+- Generate 2M-3M validated triplets.
+- Target 40-55% UMLS-grounded synthetic/semi-synthetic examples.
 - Train base model.
 - Mine dense negatives using the trained checkpoint.
 - Rebuild triplets with dense negatives.
