@@ -1,10 +1,10 @@
 # DSPy synthetic query generation defaults.
 
 dspy:
-  lm: openai/local-med-generator
+  lm: gemma-4-31B
   api_base: http://localhost:8000/v1
   api_key_env: OPENAI_API_KEY
-  temperature: 0.7
+  temperature: 0.3
   max_tokens: 256
   cache: true
   num_retries: 3
@@ -27,7 +27,7 @@ generation:
   keep_debug_rationale_private: true
 
 validators:
-  max_forbidden_surface_overlap: 0.25
+  max_forbidden_surface_overlap: 0.45
   min_alternative_term_count: 1
   reject_generic_queries: true
   reject_near_duplicates: true

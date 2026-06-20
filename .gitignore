@@ -208,8 +208,31 @@ __marimo__/
 .claude./
 # Data files (large, download separately)
 data/raw/
-data/processed/
+data/processed/private/
+# Allow public artifacts: !data/processed/public/
 checkpoints/
 indexes/
 runs/
 outputs/
+
+# One-off batch/scratch runner scripts (superseded by scripts/data/multistyle_batch_v2.py
+# and scripts/data/production_batch.py). Kept locally for reference, not tracked.
+/run_batch_*.py
+/scripts/run_batch_*.py
+/scripts/data/run_batch*_generation.py
+/scripts/data/run_batch4_filtered.py
+/scripts/data/run_batch_25.py
+
+# Large generated query dumps (regenerate via the pipeline; pushed to HF Hub).
+/keyword_queries.csv
+/strong_full_questions.csv
+
+# Exploration notebook (ad-hoc, not part of the pipeline).
+/explore_dataset.ipynb
+
+# One-off UMLS downloader — contains a hardcoded API key (do NOT commit;
+# rotate the key and move this out of the tree or load from env if needed).
+/download_all_umls.py
+
+# Session-scaffolding notes (references local .claude paths, not project docs).
+/RULES.md

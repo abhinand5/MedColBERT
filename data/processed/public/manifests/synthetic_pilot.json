@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "timestamp": "2026-06-16T22:05:00",
+  "build_status": {
+    "phase_1_environment": "COMPLETE",
+    "phase_2_ontology": "COMPLETE",
+    "phase_3_passage_store": "COMPLETE",
+    "phase_4_prerequisites": "COMPLETE",
+    "phase_4_generation_loop": "IN_PROGRESS"
+  },
+  "infrastructure": {
+    "code_lines": 3800,
+    "source_modules": 18,
+    "test_files": 3,
+    "tests_passing": 18,
+    "script_files": 16,
+    "config_files": 6
+  },
+  "ontology": {
+    "concept_strings": 9419761,
+    "unique_cuis": 3329674,
+    "concept_edges": 42214110,
+    "concept_pairs": 3924756,
+    "semantic_groups": 16,
+    "vocab_shift_types": 4
+  },
+  "passage_store": {
+    "total_passages": 1008,
+    "annotated_passages": 150,
+    "sources": ["pubmed"]
+  },
+  "generation_results": {
+    "modes_completed": 2,
+    "modes_in_progress": 1,
+    "modes_remaining": 1,
+    "total_generated": 400,
+    "total_accepted": 42,
+    "overall_acceptance_rate": 0.30,
+    "best_dimension": "passage_specificity",
+    "best_rate": 0.36,
+    "generator_method": "two_step_extraction",
+    "judge_model": "gemma-4-31B",
+    "generator_model": "gemma-4-31B"
+  },
+  "remaining_to_target": {
+    "accepted_needed": 958,
+    "batches_estimated": 32,
+    "mode_4_pending": true
+  }
+}

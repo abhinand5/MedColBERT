@@ -1,0 +1,15 @@
+{
+  "total_passages": 1008,
+  "total_documents": 1000,
+  "sources": [
+    "pubmed"
+  ],
+  "coverage": {
+    "pubmed": {
+      "source": "pubmed",
+      "num_passages": 1008,
+      "num_source_docs": 1000,
+      "avg_text_length": 1111.3025793650793
+    }
+  }
+}

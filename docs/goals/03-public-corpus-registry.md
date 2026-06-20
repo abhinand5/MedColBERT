@@ -15,9 +15,7 @@ from public biomedical or clinical corpora wherever possible.
 Use these first:
 
 - PubMed abstracts or MedRAG/pubmed-style corpora.
-- PMC Open Access passages and citation contexts.
 - ClinicalTrials.gov trial records.
-- PMC-Patients or NCBI Open-Patients style patient descriptions.
 - BioASQ and TREC qrel-backed corpora for supervised examples where allowed.
 
 Use OpenMed sources selectively:
@@ -45,7 +43,6 @@ Private passage store:
 ```text
 data/processed/private/passages/passages.parquet
 data/processed/private/passages/passage_cui_matches.parquet
-data/processed/private/passages/citation_contexts.parquet
 data/processed/private/passages/fingerprints.parquet
 ```
 
@@ -96,17 +93,14 @@ confidence: str
    - default max tokens: 256 to 384
    - overlap: 32 to 64 tokens
    - keep source document ID
-4. Build citation-context extraction for PMC:
-   - citation sentence or paragraph as query-like text
-   - cited article or cited passage as positive
-5. Add deterministic fingerprints:
+4. Add deterministic fingerprints:
    - exact hash
    - normalized hash
    - MinHash or SimHash
    - PMID, PMCID, NCT ID where available
-6. Annotate passages with UMLS matches privately.
-7. Report concept coverage by corpus and semantic group.
-8. Save public-safe corpus manifests.
+5. Annotate passages with UMLS matches privately.
+6. Report concept coverage by corpus and semantic group.
+7. Save public-safe corpus manifests.
 
 ## Acceptance Criteria
 
