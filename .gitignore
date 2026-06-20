@@ -227,9 +227,6 @@ outputs/
 /keyword_queries.csv
 /strong_full_questions.csv
 
-# Exploration notebook (ad-hoc, not part of the pipeline).
-/explore_dataset.ipynb
-
 # One-off UMLS downloader — contains a hardcoded API key (do NOT commit;
 # rotate the key and move this out of the tree or load from env if needed).
 /download_all_umls.py

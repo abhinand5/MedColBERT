@@ -1,162 +1,137 @@
-# MedColBERT — Next-Phase Plan (Phases 4.5 → 8)
+# MedColBERT — Next-Phase Plan (Phases 5 → 8)
 
 **Audience:** an implementing agent of any skill level. This plan is self-contained:
-read it top-to-bottom, execute the tasks in order, do not skip the verification gates.
-Each phase lists *what to build*, *exact commands*, *the acceptance gate*, and *the
-known pitfalls* (these are real bugs already hit once — re-hitting them wastes hours).
+read it top-to-bottom, execute the phases in order, do not skip the verification gates.
+Each phase lists *what to build*, *exact commands*, *the acceptance gate*, and *known
+pitfalls* (these are real bugs already hit once — re-hitting them wastes hours).
 
-**Last updated:** 2026-06-20. **Current commit:** `176e436` on branch `dev`.
+**Last updated:** 2026-06-20. **Branch:** `dev`. **Dataset on HF:** `fierysurf/medcolbert-synthetic-pilot`.
+
+> Read [AGENTS.md](../AGENTS.md) and [GOALS.md](../GOALS.md) first. They define the
+> research contract, privacy rules, required baselines, and go/no-go gates. This plan is
+> the *execution sequence + operational pitfalls* layered on top of the authoritative
+> `docs/goals/0N-*.md` specs. When this plan and a goal spec disagree, the goal spec wins.
 
 ---
 
 ## 0. Where we are right now
 
-- **Done (Phase 1–4):** the full data + synthetic-generation stack is built and committed.
-  - `src/medcolbert/` package: `data/` (ontology, passages, corpora, umls),
-    `generation/` (dspy_programs, direct_generator, validators, teacher_filter, prompts),
-    `utils/`, `cli.py` (Typer entrypoint: `umls`/`data`/`synth`/`eval`/`train` sub-apps;
-    only `umls`/`data`/`synth` have commands — `eval` and `train` are **empty stubs**).
-  - Canonical generation script: `scripts/data/multistyle_batch_v2.py` (vLLM + Gemma-4-31B
-    at `http://localhost:8000/v1`). Consolidation/HF push:
-    `scripts/data/consolidate_multistyle.py`. Audits: `audit_quality.py` (proxy) and
-    `ngram_copy_audit.py` (authoritative — see §1.2).
-  - Tests: `uv run --extra dev pytest` → 17 passed, 1 skipped.
-  - Dataset on HF: `fierysurf/medcolbert-synthetic-pilot`, **100,867 examples**.
+### Done — Phases 1–4.5 (data + synthetic generation, regenerated)
 
-- **The problem (see `docs/audit_2026-06-20.md`):** only **3/8 quality thresholds met**.
-  The dataset on HF was generated at `temp=0.0` and the audit verdict is explicit:
-  *"NOT suitable for ColBERT contrastive training in current state."* The code fixes are
-  in place but **the HF dataset has NOT been regenerated with them yet.**
+The full data + synthetic-generation stack is built, committed, and **the dataset has
+been regenerated to pass all quality thresholds**. The old `temp=0.0` corpus (FAKE vocab
+shift) on HF has been *replaced*, not appended.
+
+- **`src/medcolbert/` package:** `data/` (ontology, passages, corpora, umls),
+  `generation/` (dspy_programs, direct_generator, validators, teacher_filter, prompts),
+  `utils/` (config, hashing, io, logging, text), `cli.py` (Typer entrypoint with
+  `umls` / `data` / `synth` sub-apps implemented; **`eval` and `train` are registered but empty**).
+- **Canonical generation script:** `scripts/data/multistyle_batch_v2.py` (vLLM + Gemma-4-31B
+  at `http://localhost:8000/v1`). Consolidation/HF push: `scripts/data/consolidate_multistyle.py`.
+  Audits: `audit_quality.py` (proxy) and `ngram_copy_audit.py` (authoritative — see §0.2).
+- **Tests:** `uv run --extra dev pytest` → 17 passed, 1 skipped.
+- **Dataset on HF:** `fierysurf/medcolbert-synthetic-pilot`, **100,084 examples**, clean repo
+  (13 files, zero legacy `mode3`/root parquets).
+
+### Current dataset quality (all 8 thresholds PASS — verified 2026-06-20)
 
 | Threshold | Target | Actual | Status |
 |---|---|---|---|
 | UMLS artifacts | <0.5% | 0.0% | ✅ |
-| Abbreviation genuine | ≥80% | 52% | ❌ |
-| Vocabulary shift (n-gram copy) | ≥60/100 | 10–21/100 | ❌ |
-| Hallucinated terms | <5% | 0.9–1.2% | ✅ |
-| Template monotony | <30% | 90% | ❌ |
-| Data integrity | no corruption | 97/100 | ✅ |
-| Dataset size | 100K+ | 100,867 | ✅ |
-| Pushed to HF | yes | yes | ✅ |
+| Abbreviation genuine | ≥80% | 91.25% | ✅ |
+| Vocabulary shift (n-gram copy) | ≥60/100 all families | 99.9/100 | ✅ |
+| Hallucinated terms | <5% | 0.0% | ✅ |
+| Template monotony | <30% | 0.022% | ✅ |
+| Data integrity | no corruption | 97+/100 | ✅ |
+| Dataset size | 100K+ | 100,084 | ✅ |
+| Pushed to HF | yes | clean replace | ✅ |
 
-- **What is NOT done (Phases 5–8):** triplets + negatives, ColBERT training, evaluation,
-  release/paper. The numbered scripts `scripts/data/05_mine_bm25_negatives.py`,
-  `06_mine_dense_negatives.py`, `07_merge_and_deduplicate.py` are **0-line stubs**.
-  Configs `configs/train_base.yaml`, `configs/eval.yaml`, `configs/base.yaml`,
-  `configs/large.yaml` already exist and define the contracts below.
+Distribution: `symptom_to_diagnosis` 31,308 / `biomedical_to_clinical` 26,657 /
+`brand_generic` 21,947 / `lay_to_clinical` 17,827 / `abbreviation_to_expanded` 2,345.
+Styles balanced ~25K each: `keyword_technical` 26,701 / `keyword_clinical` 26,474 /
+`keyword_layperson` 24,864 / `full_question` 22,045.
 
-- **Housekeeping note:** `download_all_umls.py` is gitignored because it contains a
-  **hardcoded UMLS API key** — do not commit it; load keys from env (`UMLS_API_KEY`)
-  instead, and rotate the exposed key.
+### NOT done — Phases 5–8 (where this plan picks up)
+
+- **Phase 5 (triplets + negatives):** `scripts/data/05_mine_bm25_negatives.py`,
+  `06_mine_dense_negatives.py`, `07_merge_and_deduplicate.py` are **0-line stubs**. No
+  `src/medcolbert/triplets/` module exists.
+- **Phase 6 (training):** no `src/medcolbert/train/` module; `train_app` CLI is empty.
+  Configs `configs/train_base.yaml`, `configs/base.yaml`, `configs/large.yaml` exist and
+  define the stage contracts.
+- **Phase 7 (evaluation):** no `src/medcolbert/eval/` module; `eval_app` CLI is empty.
+  `configs/eval.yaml` exists.
+- **Phase 8 (release/paper):** not started.
+
+### 0.1 The two metrics that matter (do not be fooled)
+
+1. **Vocabulary shift = n-gram copy rate, NOT the proxy.** `audit_quality.py` reports
+   88–94/100 via alt_term presence + `term_overlap`. That is misleading and was the reason
+   the old dataset passed a fake bar while having 10–21/100 real vocab shift. The real
+   metric is **n-gram copy rate** = fraction of query 4-grams appearing verbatim in the
+   source passage. Authoritative tool:
+   ```
+   uv run python scripts/data/ngram_copy_audit.py --per-family
+   # score = 100 * (1 - mean_4gram_copy). Good data ≈ 99/100. Threshold: ≥60/100 every family.
+   ```
+2. **Low `term_overlap` is expected, not a bug.** ~70% of rows have `term_overlap < 0.5`.
+   Keyword queries are short and use *substituted* vocabulary — low overlap is the whole
+   point. Do NOT "fix" low term_overlap by regenerating; it is not hallucination
+   (hallucination is 0.0%, verified separately).
+
+### 0.2 Generation guardrails already baked into the code (do not regress)
+
+These are solved problems. If you regenerate data, keep them:
+
+- **Temperatures:** 0.2 (fact extraction), 0.7 (questions), 0.8 (keywords), `top_p=0.95`,
+  `top_k=64`. The old `temp=0.0` caused the template monoculture and fake vocab shift.
+- **Forced question openers:** `multistyle_batch_v2.py` has `QUESTION_OPENERS` (10 openers)
+  and `_pick_question_opener()` which deterministically assigns one per row via MD5 of
+  `(fact, role, task_family, cui_label, alt_term)`. This killed the "Does [NP] [VP]?"
+  monoculture (37% → 0.022%). If `full_question` monotony creeps above 30%, regenerate
+  *just* those rows cheaply with `scripts/data/regen_full_questions.py` (~5× cheaper than
+  full batches; output → `fq_v6_*` dirs).
+- **Abbreviation quality (`scripts/data/prepare_abbreviation_passages.py`):** three pitfalls
+  already fixed — (a) plain-word alt_terms (Lung, zinc, Crohn) rejected by requiring a
+  digit OR internal capitalization + a large `_COMMON_WORDS` stoplist; (b) numeric alt_terms
+  ("2", "223", "T2") rejected by requiring an alpha run ≥2 in both `abbreviated` and
+  `abbreviated_norm`; (c) homonym mismatches killed by the `_content_words()` definitional
+  co-occurrence filter (≥2 distinctive overlaps within 80 chars). The abbreviation pool is
+  small (~830 passages, ~2.3K rows) by design — it is ~2% of the dataset; the 4 main
+  families are the bulk and matter more.
+- **Consolidation scans `v6_fresh/` only** (`consolidate_multistyle.py find_all_accepted()`),
+  excluding legacy `ontology_grounded_teacher_filtered/` (temp=0.0). It also drops the old
+  low-quality `abbreviation_to_expanded` rows from `div_v6_0001..0018` and the old templated
+  `full_question` rows from `div_v6_*` (replaced by `fq_v6_*`).
+
+### 0.3 Housekeeping rules (carry forward)
+
+- `download_all_umls.py` is **gitignored** — it contains a hardcoded UMLS API key. Do not
+  commit it. Load keys from env (`UMLS_API_KEY`) and rotate the exposed key.
+- Scratch `run_batch_*.py` scripts and large CSV dumps (`keyword_queries.csv`,
+  `strong_full_questions.csv`) are gitignored by design — keep them out of git.
+- **Always use `uv`.** `uv run python …`, `uv run pytest`, `uv run medcolbert …`. Never bare
+  `pip`/`python`. Python 3.11 or 3.12.
+- **Private data stays in `data/processed/private/`.** Public manifests (counts/hashes
+  only) go in `data/processed/public/manifests/`. UMLS strings, CUI mappings, synonym
+  tables, matched spans, synthetic queries embedding UMLS terms are all private.
+- **Library logic in `src/medcolbert/`, scripts are thin CLI shims.** Match the existing
+  `data/`/`generation/` layout when adding triplets/train/eval code.
 
 ---
 
-## 1. Phase 4.5 — Dataset Quality Remediation (BLOCKER; do this first)
+## 1. Phase 5 — Triplets and Negatives
 
-**Goal:** regenerate the dataset so all 8 thresholds pass *before* spending any compute
-on triplets/training. Training on the current HF dataset will produce a model that
-reformulates rather than substitutes vocabulary — the core hypothesis would be untestable.
+**Goal:** turn the 100K accepted synthetic examples into ColBERT training triplets with
+strong, audited negatives and zero eval leakage. Spec: `docs/goals/05-triplets-and-negatives.md`.
 
-**Estimated time:** 6–8 hours of vLLM generation (mostly unattended), ~1 hour of hands-on.
-
-### 1.1 Preconditions
-- vLLM serving Gemma-4-31B at `http://localhost:8000/v1`. Verify:
-  `curl -s http://localhost:8000/v1/models | jq '.data[0].id'` → must contain `gemma`.
-- `HF_TOKEN` exported (for the final push).
-- `uv sync --extra generation --extra data --extra dev` is current.
-
-### 1.2 The metric that matters (do not be fooled)
-`audit_quality.py` reports 88–94/100 via alt_term presence + term_overlap. **That proxy
-is misleading.** The real vocabulary-shift metric is **n-gram copy rate** = fraction of
-query 4-grams appearing verbatim in the source passage. Use:
-
-```
-uv run python scripts/data/ngram_copy_audit.py --per-family
-# score = 100 * (1 - mean_4gram_copy). Good data ≈ 99/100. Threshold: ≥60/100 every family.
-```
-
-Note: ~70% of rows have `term_overlap < 0.5` and **that is expected** (keyword queries
-are short + use substituted vocab), not hallucination. Do not "fix" low term_overlap.
-
-### 1.3 Tasks
-
-1. **Regenerate with the fixed code.** The fixes are already in
-   `multistyle_batch_v2.py` (temp 0.2 fact / 0.7 questions / 0.8 keywords, diversified
-   prompts, `QUESTION_OPENERS` + deterministic per-row opener via MD5 of
-   `(fact,role,task_family,cui_label,alt_term)`, Q4 term-overlap check, post-generation
-   rejection filter). Run the orchestrator to reach 100K accepted:
-   ```
-   uv run python scripts/data/orchestrator_v2.py --target 100000
-   ```
-   - Keyword-style queries skip LLM judging (accepted if validation passes) — this is
-     intentional, cuts judging time ~75%. Do not add judging back.
-   - Outputs land in `v6_fresh/` batch dirs (NOT the legacy `ontology_grounded_teacher_filtered/`).
-
-2. **Regenerate `full_question` rows cheaply if monotony creeps back.** If
-   `audit_quality.py` shows the "Does [NP] [VP]?" template >30% on `full_question`, do
-   **not** rerun whole batches. Use the forced-opener regen (~5× cheaper, reuses
-   extracted facts/passages):
-   ```
-   uv run python scripts/data/regen_full_questions.py
-   ```
-   Output → `fq_v6_*` dirs. Consolidation drops old `div_v6` `full_question` rows and
-   keeps `fq_v6` + `div_v6` keyword rows.
-
-3. **Fix abbreviation quality (52% → ≥80%).** Run
-   `scripts/data/prepare_abbreviation_passages.py`. The pitfalls (already solved in code,
-   do not regress) are:
-   - **Plain-word alt_terms** (Lung, Eels, zinc, Crohn accepted as "abbreviations"):
-     `is_real_abbreviation()` requires a digit OR internal capitalization (camelCase like
-     cGMP/hCG) for short mixed-case, plus a large `_COMMON_WORDS` stoplist checked
-     case-insensitively.
-   - **Numeric alt_terms** (cancer-staging codes "2", "223", "T2"): in
-     `build_abbreviation_index()`, require an alphabetic run ≥2 in **both** `abbreviated`
-     and `abbreviated_norm`, plus common-word check on both.
-   - **Homonym mismatches** (dominant failure): the wrong expansion is chosen because it
-     shares generic words with the passage (TTP→"...WITH thrombospondin" matched a
-     thymidine passage via "with"). Fix: the context-relevance filter uses
-     `_content_words()` (≥4 chars, alpha, **excluding** generic biomedical/English
-     stopwords like with/type/protein/gene/nuclear/membrane) and requires **≥2
-     distinctive overlaps**. ≥1 overlap leaves ~9% homonyms; ≥2 cuts them to ~zero but
-     shrinks the pool ~6× (7300→730 passages). Accept the smaller pool — abbreviation is
-     ~3% of the dataset by design; the 4 main families are the bulk.
-   - The abbreviation pool is small (~830 passages, ~3K rows after strict filtering).
-     That is correct, not a bug.
-
-4. **Backfill underrepresented slices** (audit §5): `abbreviation_to_expanded` had 256
-   rows vs 17–31K for others; 6 semantic groups had <100 rows. Re-run
-   `multistyle_batch_v2.py` with passage filters targeting the thin groups until each
-   task family ≥ ~5K and each semantic group ≥ ~500. Role-style is confounded (each role
-   locked to one query style) — loosen that mapping in the prompt if a family is stuck.
-
-5. **Consolidate + push.** `find_all_accepted()` scans `v6_fresh/` **only** (excludes
-   legacy temp=0.0 dir). Then push and clean stale files:
-   ```
-   HF_TOKEN=... uv run python scripts/data/consolidate_multistyle.py --push
-   uv run python scripts/data/hf_clean_stale.py
-   ```
-
-### 1.4 Gate (must pass before Phase 5)
-Re-run both audits against the freshly consolidated dataset and confirm:
-- `ngram_copy_audit.py --per-family` → **≥60/100 every family** (aim 90+).
-- `audit_quality.py` → abbreviation genuine **≥80%**, template monotony **<30%**
-  (keyword queries have 0% monotony by design — do not count their starter-word
-  concentration against the threshold).
-- Hallucination **<5%**, UMLS artifacts **0%**, integrity **97+/100**, size **≥100K**.
-
-Do not proceed to Phase 5 until all 8 are green. If a threshold fails, the fix is almost
-always in §1.3 tasks 1–4, not new code.
-
----
-
-## 2. Phase 5 — Triplets and Negatives
-
-**Goal:** turn accepted synthetic examples into ColBERT training triplets with strong,
-audited negatives and zero eval leakage. Spec: `docs/goals/05-triplets-and-negatives.md`.
-
-**Inputs:** accepted synthetic examples (Phase 4.5), passage store
-(`data/processed/private/passages/passages.parquet` + `passage_cui_matches.parquet`),
-ontology edges/pairs, eval blocklists + fingerprints.
+**Inputs (private):**
+- Accepted synthetic examples: `data/processed/private/synthetic/consolidated/mode4_teacher_filtered_multistyle.parquet`
+  (+ per-style `mode4_*.parquet`).
+- Passage store: `data/processed/private/passages/` (`passages.parquet`,
+  `passage_cui_matches.parquet`, and `real_annotated_500.json` / `abbreviation_passages.json`
+  used by generation).
+- Ontology edges/pairs: UMLS `concept_pairs.parquet` / `concept_strings.parquet`.
 
 **Outputs (private):**
 ```
@@ -171,77 +146,90 @@ data/processed/public/manifests/triplet_counts.json
 data/processed/public/manifests/decontamination_report.json
 ```
 
-### 2.1 Triplet schema (exact — every column required)
+### 1.1 Triplet schema (exact — every column required)
 ```
 triplet_id, query, positive_passage_id, negative_passage_id, source,
 generation_mode, task_family, target_cuis, positive_cuis, negative_cuis,
 negative_type, negative_source, teacher_margin, split, data_hash
 ```
 
-### 2.2 Tasks
+### 1.2 Tasks
 
-1. **Fill the stub scripts.** `scripts/data/05_mine_bm25_negatives.py`,
-   `06_mine_dense_negatives.py`, `07_merge_and_deduplicate.py` are empty. Implement them
-   as thin wrappers over a new `src/medcolbert/triplets/` module (mirror the
-   `data/`/`generation/` layout: library logic in `src/`, scripts are CLI shims). Suggested
-   modules: `negatives.py` (mining), `decontam.py` (blocking), `build.py` (assembly).
+1. **Create the library module.** Add `src/medcolbert/triplets/` with:
+   - `negatives.py` — BM25 + ontology negative mining.
+   - `decontam.py` — eval blocklists + text-similarity blocking.
+   - `build.py` — triplet assembly, schema enforcement, splits.
+   Match the existing `data/`/`generation/` style (typed functions, deterministic IDs,
+   `pathlib.Path`, short comments). Then fill the three **0-line stub scripts**
+   (`05_mine_bm25_negatives.py`, `06_mine_dense_negatives.py`,
+   `07_merge_and_deduplicate.py`) as thin CLI wrappers over these modules.
 
 2. **Negative types** (mix several per query; `random` is calibration-only, low fraction):
-   - `bm25_hard` — lexically similar, not the target concept (from a BM25 index over the
-     passage store; this is what `05_mine_bm25_negatives.py` builds).
+   - `bm25_hard` — lexically similar but not the target concept. This is what
+     `05_mine_bm25_negatives.py` builds (a BM25 index over the passage store).
    - `ontology_parent_child`, `ontology_sibling`, `ontology_related` — from ontology edges.
    - `same_semantic_group` — same group, different concept.
-   - `dense_mined` — **only after a Stage-2 checkpoint exists** (Phase 6). Do NOT add
-     dense-mined negatives before the first model is trained (explicit common-mistake).
+   - `dense_mined` — **only after a Stage-2 checkpoint exists (Phase 6).** Do NOT add
+     dense-mined negatives before the first model is trained. This is the explicit purpose
+     of `06_mine_dense_negatives.py` and it must stay a stub until Phase 6 Stage 2.
    - `random` — small fraction, calibration.
 
-3. **False-negative controls — reject a negative if** it shares any primary target CUI
-   with the query; it is a near-duplicate of the positive; it has the same
+3. **False-negative controls — reject a negative if** it shares any primary target CUI with
+   the query; it is a near-duplicate of the positive; it has the same
    PMID/PMCID/NCT/source-doc as the positive (accidental positive); a teacher/heuristic
-   flags it relevant; manual audit repeatedly marks the type ambiguous. Ambiguous
-   negatives poison contrastive training — when unsure, drop it.
+   flags it relevant; manual audit repeatedly marks the type ambiguous. **When unsure, drop
+   it** — ambiguous negatives poison contrastive training.
 
-4. **Decontamination (before writing train files):** block exact eval IDs (PMID, PMCID,
-   NCT, dataset-specific IDs), exact text hashes, normalized text hashes, and
-   near-duplicates by MinHash/SimHash threshold. Also block synthetic queries too similar
-   to eval queries. **Do not decontaminate by IDs alone — use text similarity too.**
-   Write `decontamination_report.json`.
+4. **Decontamination (before writing train files):** block exact eval IDs (PMID, PMCID, NCT,
+   dataset-specific IDs), exact text hashes, normalized text hashes, and near-duplicates by
+   MinHash/SimHash threshold. Also block synthetic queries too similar to eval queries.
+   **Do not decontaminate by IDs alone — use text similarity too.** Write
+   `decontamination_report.json` with counts of blocked items per method.
 
 5. **Splits:** build `pilot_triplets.parquet` (50–100K, diversity over size) and a
    `dev_triplets.parquet` holdout. `v1_triplets.parquet` is the scaled-up version with
-   source-aware sampling — no single source dominates without an explicit config weight.
+   source-aware sampling — no single source dominates without an explicit config weight in
+   `configs/data.yaml`.
 
-### 2.3 Gate
+### 1.3 Gate (must pass before Phase 6)
 - 50K–100K pilot triplets after decontamination.
 - Every triplet carries `source`, `task_family`, `generation_mode`, `negative_type`.
-- `negative_audit_samples.parquet` shows acceptable false-negative rate on manual review.
+- `negative_audit_samples.parquet` shows acceptable false-negative rate on manual review
+  (sample ≥200, aim <5% ambiguous/wrong).
 - `decontamination_report.json` shows zero known eval leakage.
-- Ablation subsets selectable by `generation_mode` and `negative_type`.
+- Ablation subsets selectable by `generation_mode` and `negative_type` (verify with a count query).
+
+### 1.4 Pitfalls
+- A single accidental-positive negative can dominate a batch's loss. Sample negatives, log
+  `negative_source`, and audit before training.
+- BM25 negatives that share the target CUI are false negatives — the CUI reject rule above
+  is mandatory, not optional.
 
 ---
 
-## 3. Phase 6 — ColBERT Training
+## 2. Phase 6 — ColBERT Training
 
 **Goal:** train the model variants that isolate the value of ontology-controlled
 supervision. Spec: `docs/goals/06-colbert-training.md`. Backbone:
-`thomas-sounack/BioClinical-ModernBERT` (`configs/base.yaml`). Framework: PyLate.
+`thomas-sounack/BioClinical-ModernBERT` (`configs/base.yaml`). Framework: **PyLate**
+(already in the `training` extra: `pylate>=1.0.0`).
 
-### 3.1 Model variants — train IN THIS ORDER (each is a controlled comparison)
+### 2.1 Model variants — train IN THIS ORDER (each is a controlled comparison)
 1. `generic_colbert` — off-the-shelf ColBERT/PyLate baseline.
 2. `bioclinical_colbert_no_ontology` — same backbone, no ontology-controlled generation.
-3. `medcolbert_ontology_grounded` — ontology-controlled synthetic supervision.
-4. `medcolbert_teacher_filtered` — + modern LLM/reranker filtering.
+3. `medcolbert_ontology_grounded` — ontology-controlled synthetic supervision (the 100K dataset).
+4. `medcolbert_teacher_filtered` — + modern LLM/reranker filtering (if a filtered subset is built).
 5. `medcolbert_dense_negative_refresh` — continue/retrain with dense-mined negatives
-   (requires the Stage-2 checkpoint → this variant closes the loop with Phase 5 §2.2).
+   (requires the Stage-2 checkpoint → closes the loop with Phase 5 §1.2).
 
 **Large-model training is optional** and only after base ablations support the hypothesis.
 
-### 3.2 Tasks
+### 2.2 Tasks
 
 1. **Add `train` commands to the CLI** (`src/medcolbert/cli.py`, `train_app` is registered
    but empty). Suggested: `medcolbert train smoke`, `medcolbert train run --stage`,
-   `medcolbert train index` (build a tiny retrieval index for sanity). Put training logic
-   in a new `src/medcolbert/train/` module; keep `cli.py` thin.
+   `medcolbert train index`. Put training logic in a new `src/medcolbert/train/` module;
+   keep `cli.py` thin (mirror how `synth`/`data` are wired).
 
 2. **Stage 0 — smoke test** (`configs/train_base.yaml` `stage0_smoke`): 1K examples,
    verify forward pass, loss decreases, no NaN/Inf, build a tiny index, retrieve positives
@@ -269,14 +257,14 @@ supervision. Spec: `docs/goals/06-colbert-training.md`. Backbone:
    model name+revision, tokenizer revision, dep lockfile hash, seed, hardware, precision,
    grad accumulation, effective batch size. `metrics.jsonl` per step.
 
-### 3.3 Critical discipline (common-mistakes, from the spec)
+### 2.3 Critical discipline (common-mistakes, from the spec)
 - Do not compare MedColBERT to a weaker-backbone baseline only — the no-ontology
   BioClinical-ColBERT control (#2) is mandatory.
 - Do not change backbone, data, negatives, and loss all at once — one variable per variant.
 - Do not overfit raw UMLS synonym strings.
 - Do not train a large model before base ablations are interpretable.
 
-### 3.4 Gate
+### 2.4 Gate
 - `bioclinical_colbert_no_ontology` and `medcolbert_*` both train successfully on the same
   backbone with comparable compute.
 - Training curves stable (no loss spikes/NaN).
@@ -286,13 +274,13 @@ supervision. Spec: `docs/goals/06-colbert-training.md`. Backbone:
 
 ---
 
-## 4. Phase 7 — Evaluation and Claims
+## 3. Phase 7 — Evaluation and Claims
 
 **Goal:** evaluate on real external benchmarks + vocabulary-shift slices; state only
 evidence-supported claims. Spec: `docs/goals/07-evaluation-and-claims.md`. Config:
 `configs/eval.yaml`.
 
-### 4.1 Tasks
+### 3.1 Tasks
 
 1. **Add `eval` commands to the CLI** (`eval_app` is registered but empty). Suggested:
    `medcolbert eval run --benchmark`, `medcolbert eval table`, `medcolbert eval slice`.
@@ -304,9 +292,9 @@ evidence-supported claims. Spec: `docs/goals/07-evaluation-and-claims.md`. Confi
    TREC-COVID). **Add MIRAGE/MedRGB only after retrieval quality is established** — RAG
    benchmarks entangle retriever with generator/prompt.
 
-3. **Required metrics:** nDCG@10, Recall@100, Recall@1000 (when candidate recall
-   matters), MAP@10 (benchmark-standard), index size, query latency, encoding throughput,
-   MRL 32/64/128 tradeoff (when MRL enabled).
+3. **Required metrics:** nDCG@10, Recall@100, Recall@1000 (when candidate recall matters),
+   MAP@10 (benchmark-standard), index size, query latency, encoding throughput, MRL
+   32/64/128 tradeoff (when MRL enabled).
 
 4. **Vocabulary-shift slices** (this is the core experiment — `eval.yaml` `vocab_split`
    already lists the buckets): same_vocab, lay_to_clinical, abbreviation_to_expanded,
@@ -327,7 +315,7 @@ evidence-supported claims. Spec: `docs/goals/07-evaluation-and-claims.md`. Confi
 7. **Outputs:** `main_table.json`, `vocab_shift_table.json`, `efficiency_table.json`,
    `baseline_table.json`, `decontamination_summary.json` under `runs/eval/`.
 
-### 4.2 Claim discipline
+### 3.2 Claim discipline
 - Acceptable: *"MedColBERT achieves competitive or state-of-the-art results on selected
   biomedical and clinical retrieval benchmarks, with the largest gains on
   vocabulary-shift slices."*
@@ -336,15 +324,16 @@ evidence-supported claims. Spec: `docs/goals/07-evaluation-and-claims.md`. Confi
 - Do not tune prompts/data generation against the test set. Do not report RAG gains as
   pure retrieval gains.
 
-### 4.3 Gate
-- All eval corpora decontaminated from training (cross-check `decontamination_report.json`).
+### 3.3 Gate
+- All eval corpora decontaminated from training (cross-check
+  `data/processed/public/manifests/decontamination_report.json`).
 - Baselines run with comparable corpora + documented settings.
 - No-ontology ColBERT control included.
 - Vocab-shift buckets reported. Efficiency reported. Claims benchmark-scoped.
 
 ---
 
-## 5. Phase 8 — Release and Paper (brief)
+## 4. Phase 8 — Release and Paper (brief)
 
 Spec: `docs/goals/08-release-and-paper.md`. Only after Phase 7 gates pass.
 - License-safe code + model release; UMLS-derived artifacts stay private/gated.
@@ -356,27 +345,32 @@ Spec: `docs/goals/08-release-and-paper.md`. Only after Phase 7 gates pass.
 
 ---
 
-## 6. Cross-cutting rules (apply to every phase)
+## 5. Cross-cutting rules (apply to every phase)
 
 1. **Always use `uv`.** `uv run python …`, `uv run pytest`, `uv run medcolbert …`,
    `uv sync --extra <group>`. Never bare `pip`/`python`/`pytest`. Python 3.11 or 3.12.
-2. **Private data stays in `data/processed/private/`** — UMLS strings, CUI mappings,
-   synonym tables, matched spans, SNOMED dumps, synthetic queries embedding UMLS terms.
-   Public manifests (counts/hashes only) go in `data/processed/public/manifests/`.
+2. **Private data stays in `data/processed/private/`.** Public manifests (counts/hashes
+   only) go in `data/processed/public/manifests/`.
 3. **Library logic in `src/medcolbert/`, scripts are thin CLI shims.** Match the existing
-   module layout when adding triplets/train/eval code. Keep `cli.py` thin.
+   module layout. Keep `cli.py` thin.
 4. **One variable per change.** Don't change backbone + data + negatives + loss together.
 5. **Verify before declaring done.** Run the audit/gate of the current phase; report real
    numbers. If a gate fails, say so — don't paper over it.
-6. **Commit per phase** with a clear message; keep `dev` branch. Don't commit secrets
-   (the UMLS key in `download_all_umls.py` is intentionally gitignored).
+6. **Commit per phase** with a clear message; keep the `dev` branch. Don't commit secrets.
 7. **Re-read the relevant `docs/goals/0N-*.md`** before starting each phase — it is the
    authoritative spec; this plan is the execution sequence + pitfalls on top of it.
 
-## 7. Suggested execution order for a fresh agent
-1. Read `docs/audit_2026-06-20.md` + this plan + `docs/goals/05-triplets-and-negatives.md`.
-2. Phase 4.5: regenerate, audit, push. **Do not start Phase 5 until §1.4 gate is green.**
-3. Phase 5: build `src/medcolbert/triplets/`, fill `05/06/07` scripts, hit §2.3 gate.
-4. Phase 6: add `train` CLI commands, Stage 0 → 4, train variant #2 then #3, hit §3.4 gate.
-5. Phase 7: add `eval` CLI commands, run benchmarks + slices + baselines, hit §4.3 gate.
-6. Phase 8: release + paper.
+---
+
+## 6. Suggested execution order for a fresh agent
+
+1. Read `AGENTS.md` + `GOALS.md` + this plan + `docs/goals/05-triplets-and-negatives.md`.
+2. **Phase 5:** build `src/medcolbert/triplets/`, fill the `05/06/07` scripts (keep `06`
+   a stub until Phase 6 Stage 2), hit §1.3 gate.
+3. **Phase 6:** add `train` CLI commands, Stage 0 → 4, train variant #2 then #3, hit §2.4 gate.
+4. **Phase 7:** add `eval` CLI commands, run benchmarks + slices + baselines, hit §3.3 gate.
+5. **Phase 8:** release + paper.
+
+If you need to regenerate synthetic data at any point (you should not need to — the
+dataset passes all gates), the recipe is in `docs/audit_2026-06-20.md` + the generation
+guardrails in §0.2 above. Do not regenerate casually; it is 6–8 hours of vLLM compute.
