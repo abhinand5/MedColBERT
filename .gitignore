@@ -233,3 +233,9 @@ outputs/
 
 # Session-scaffolding notes (references local .claude paths, not project docs).
 /RULES.md
+
+# DeepSeek API key (secret)
+.deepseek_api_key
+
+# Stray QA JSON dumps (local inspection artifacts, not source)
+/qa_output.json
