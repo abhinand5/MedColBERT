@@ -43,8 +43,8 @@ generation = [
     "litellm>=1.60.0",
 ]
 training = [
-    "pylate>=1.0.0",
-    "sentence-transformers>=3.0.0",
+    "pylate>=1.6.0",
+    "sentence-transformers>=5.0.0",
 ]
 dev = [
     "pytest>=9.0.3",
