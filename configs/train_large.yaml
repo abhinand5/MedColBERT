@@ -1,0 +1,58 @@
+# Large-model training defaults. Derived from the base run (medcolbert-base-run0)
+# by scaling for the 396M backbone: 1.69x compute, ~2x static optimizer memory.
+# See docs/plans/large-model-training.md for the full rationale.
+
+model_config: configs/large.yaml
+framework: pylate
+
+stage0_smoke:
+  enabled: true
+  max_examples: 1000
+  max_steps: 1000
+  learning_rate: 5.0e-6
+  per_device_train_batch_size: 64
+  mini_batch_size: 32
+  bf16: true
+  gradient_checkpointing: false
+  temperature: 0.02
+  warmup_ratio: 0.03
+
+stage2_colbert:
+  enabled: true
+  train_path: data/processed/private/triplets_v1.parquet
+  eval_path: data/processed/private/triplets_dev.parquet
+  max_steps: 14000           # ~5 epochs over 711k rows at batch 256; base plateaued at ep 3-4
+  learning_rate: 5.0e-6      # half of base; larger model, more conservative
+  warmup_ratio: 0.03        # 420 steps
+  per_device_train_batch_size: 256   # logical in-batch negatives, same pool as base
+  mini_batch_size: 80        # GradCache chunk; tuned for 48GB L40S without GC
+  gradient_accumulation_steps: 1     # forced by cached contrastive loss
+  bf16: true
+  gradient_checkpointing: false      # fallback: true + mini_batch_size 128
+  gather_across_devices: false       # single GPU
+  temperature: 0.02          # ColBERTv2 convention
+  save_strategy: epoch
+  save_total_limit: 3
+
+negative_sampling:
+  bm25: 1
+  concept_near: 1
+  dense_mined: 1
+  random_same_semantic_group: 1
+
+mrl:
+  enabled: true
+  dims:
+    - 32
+    - 64
+    - 128
+  weights:
+    - 0.1
+    - 0.2
+    - 0.7
+
+outputs:
+  checkpoint_dir: runs/large_stage2
+  run_dir: runs/large_stage2
+  save_steps: 10000
+  eval_steps: 5000
