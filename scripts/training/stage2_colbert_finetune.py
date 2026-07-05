@@ -20,6 +20,7 @@ Run (single L40S):
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -36,7 +37,9 @@ from medcolbert.training.pylate_train import (  # noqa: E402
     build_loss,
     build_model,
     build_trainer,
+    enable_wandb_reporting,
     resolve_stage,
+    wandb_enabled,
 )
 from medcolbert.utils.config import load_configs  # noqa: E402
 
@@ -59,6 +62,16 @@ def parse_args() -> argparse.Namespace:
                    help="Override GradCache mini_batch_size.")
     p.add_argument("--learning-rate", type=float, default=None)
     p.add_argument("--temperature", type=float, default=None)
+    p.add_argument("--no-gradient-checkpointing", action="store_true",
+                   help="Disable gradient checkpointing (use more VRAM, run "
+                        "faster). Recommended on a 48GB L40S.")
+    p.add_argument("--save-strategy", choices=["steps", "epoch"],
+                   default=None,
+                   help="Checkpoint save strategy. 'epoch' saves at the end of "
+                        "each epoch (auto-detected from dataset size + batch). "
+                        "Default: from config (steps).")
+    p.add_argument("--save-total-limit", type=int, default=None,
+                   help="Max checkpoints to keep (oldest deleted). Default: 3.")
     p.add_argument("--exclude-weak", action="store_true",
                    help="Drop negatives flagged weak by the audit.")
     p.add_argument("--min-relevant-looks", type=int, default=None,
@@ -84,14 +97,31 @@ def main() -> None:
         stage.per_device_train_batch_size = args.batch_size
     if args.mini_batch_size is not None:
         stage.mini_batch_size = args.mini_batch_size
+        # CachedContrastive is incompatible with gradient accumulation;
+        # when mini_batch_size is set (esp. via CLI), force grad_accum=1 so
+        # the configured accum doesn't silently inflate the logical batch.
+        stage.gradient_accumulation_steps = 1
     if args.learning_rate is not None:
         stage.learning_rate = args.learning_rate
     if args.temperature is not None:
         stage.temperature = args.temperature
+    if args.no_gradient_checkpointing:
+        stage.gradient_checkpointing = False
+    if args.save_strategy is not None:
+        stage.save_strategy = args.save_strategy
+    if args.save_total_limit is not None:
+        stage.save_total_limit = args.save_total_limit
 
     # Single-GPU: never gather across devices (no all-gather partner).
     if torch.cuda.device_count() <= 1:
         stage.gather_across_devices = False
+
+    if wandb_enabled():
+        enable_wandb_reporting(stage)
+        print(f"[stage2] wandb reporting enabled "
+              f"(project={os.environ.get('WANDB_PROJECT', '<unset>')})")
+    else:
+        print("[stage2] wandb not enabled (set WANDB_API_KEY to enable)")
 
     print(f"[stage2] loading {args.config_name}/{args.split} from HF...")
     train_ds, reports = prepare_training_dataset(
@@ -120,7 +150,8 @@ def main() -> None:
           f"batch={stage.per_device_train_batch_size} "
           f"mini={stage.mini_batch_size} temp={stage.temperature} "
           f"effective={stage.effective_batch} "
-          f"steps={stage.max_steps} lr={stage.learning_rate}")
+          f"steps={stage.max_steps} lr={stage.learning_rate} "
+          f"save={stage.save_strategy} limit={stage.save_total_limit}")
     loss = build_loss(model, stage)
 
     evaluator = build_evaluator(eval_ds, name="stage2_eval")

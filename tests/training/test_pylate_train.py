@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from medcolbert.training.pylate_train import (
     build_training_args,
+    enable_wandb_reporting,
     resolve_stage,
+    wandb_enabled,
 )
 
 
@@ -92,6 +94,8 @@ def test_build_training_args_has_max_steps_when_set(tmp_path):
     assert args.gradient_checkpointing is True
     assert args.learning_rate == 1e-5
     assert args.dataloader_drop_last is True
+    assert args.save_strategy == "steps"
+    assert args.save_total_limit == 3
 
 
 def test_build_training_args_uses_epochs_when_no_max_steps(tmp_path):
@@ -102,3 +106,51 @@ def test_build_training_args_uses_epochs_when_no_max_steps(tmp_path):
     args = build_training_args(s, tmp_path / "out", "run-smoke")
     assert args.max_steps == -1  # HF sentinel for "not set"
     assert args.num_train_epochs == 2
+
+
+def test_save_strategy_epoch():
+    cfg = {"stage2_colbert": {"save_strategy": "epoch", "save_total_limit": 5}}
+    s = resolve_stage(cfg, "stage2_colbert")
+    assert s.save_strategy == "epoch"
+    assert s.save_total_limit == 5
+    args = build_training_args(s, "/tmp/out", "run-x")
+    assert args.save_strategy == "epoch"
+    assert args.save_total_limit == 5
+
+
+def test_save_strategy_steps_passes_save_steps():
+    cfg = {"stage2_colbert": {"save_strategy": "steps", "save_steps": 5000}}
+    s = resolve_stage(cfg, "stage2_colbert")
+    args = build_training_args(s, "/tmp/out", "run-x")
+    assert args.save_strategy == "steps"
+    assert args.save_steps == 5000
+
+
+def test_default_report_to_is_none():
+    s = resolve_stage({}, "stage_x")
+    assert s.report_to == ["none"]
+
+
+def test_report_to_from_config():
+    cfg = {"stage2_colbert": {"report_to": ["wandb"]}}
+    s = resolve_stage(cfg, "stage2_colbert")
+    assert s.report_to == ["wandb"]
+    args = build_training_args(s, "/tmp/out", "run-x")
+    assert args.report_to == ["wandb"]
+
+
+def test_enable_wandb_reporting_flips_when_key_set(monkeypatch):
+    s = resolve_stage({}, "stage_x")
+    assert s.report_to == ["none"]
+    monkeypatch.setenv("WANDB_API_KEY", "test-key")
+    assert wandb_enabled() is True
+    enable_wandb_reporting(s)
+    assert s.report_to == ["wandb"]
+
+
+def test_enable_wandb_reporting_noop_without_key(monkeypatch):
+    monkeypatch.delenv("WANDB_API_KEY", raising=False)
+    s = resolve_stage({}, "stage_x")
+    assert wandb_enabled() is False
+    enable_wandb_reporting(s)
+    assert s.report_to == ["none"]

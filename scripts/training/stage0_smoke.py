@@ -13,6 +13,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -29,7 +30,9 @@ from medcolbert.training.pylate_train import (  # noqa: E402
     build_loss,
     build_model,
     build_trainer,
+    enable_wandb_reporting,
     resolve_stage,
+    wandb_enabled,
 )
 from medcolbert.utils.config import load_configs  # noqa: E402
 
@@ -67,6 +70,13 @@ def main() -> None:
     # Single-GPU: never gather across devices.
     if torch.cuda.device_count() <= 1:
         stage.gather_across_devices = False
+
+    if wandb_enabled():
+        enable_wandb_reporting(stage)
+        print(f"[stage0] wandb reporting enabled "
+              f"(project={os.environ.get('WANDB_PROJECT', '<unset>')})")
+    else:
+        print("[stage0] wandb not enabled (set WANDB_API_KEY to enable)")
 
     print(f"[stage0] loading up to {max_examples} triplets from HF long config...")
     train_ds, reports = prepare_training_dataset(

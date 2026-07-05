@@ -93,12 +93,18 @@ Every run must write:
 
 ## Acceptance Criteria
 
-- BioClinical-ColBERT-no-ontology trains successfully.
+- BioClinical-ColBERT-no-ontology trains successfully. **PENDING** (Phase 7
+  baseline run; see [docs/goals/07-evaluation-and-claims.md](07-evaluation-and-claims.md)).
 - MedColBERT trains successfully with the same backbone and comparable compute.
-- Training curves are stable.
-- Tiny retrieval sanity passes.
-- Candidate indexes can be built.
-- Model variants are reproducible from config and manifest files.
+  **DONE** — `runs/base_stage2/final`, 14h40m on one L40S.
+- Training curves are stable. **DONE** — loss plateaus at ~0.02 by epoch 3-4,
+  no divergence, full trajectory in [docs/phase6-training-results.md](../phase6-training-results.md).
+- Tiny retrieval sanity passes. **DONE** — Stage 0 smoke test loss 62.48 → 0.22.
+- Candidate indexes can be built. **DONE** — PLAID indexes built for all 5
+  kept checkpoints under `runs/base_stage2/eval_index_*`.
+- Model variants are reproducible from config and manifest files. **DONE** —
+  `configs/train_base.yaml` + the CLI overrides recorded in the results doc
+  fully reproduce the run.
 
 ## Common Mistakes
 

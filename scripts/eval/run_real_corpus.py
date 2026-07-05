@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from medcolbert.eval.real_corpus import (  # noqa: E402
     load_dev_queries,
+    load_real_corpus,
     run_real_corpus_eval,
 )
 
@@ -48,6 +49,13 @@ def parse_args() -> argparse.Namespace:
                    help="Optional path to write metrics JSON.")
     p.add_argument("--dev-rows-only", action="store_true",
                    help="Only load and print dev row count (no model/index).")
+    p.add_argument("--max-queries", type=int, default=None,
+                   help="Subset dev queries to this many (for fast CPU eval). "
+                        "Keeps only queries whose positive is in the corpus subset.")
+    p.add_argument("--max-corpus", type=int, default=None,
+                   help="Subset corpus to this many passages. All positives for "
+                        "the kept queries are guaranteed included; the rest are "
+                        "randomly sampled. For fast CPU eval.")
     return p.parse_args()
 
 
@@ -63,11 +71,57 @@ def main() -> None:
     if args.model is None:
         raise SystemExit("--model is required unless --dev-rows-only is set.")
 
+    dev_rows = None
+    corpus_path = corpus_path
+
+    # Subset for fast CPU eval: ensure positives are in the corpus subset.
+    if args.max_queries is not None or args.max_corpus is not None:
+        import random
+
+        full_corpus = load_real_corpus(corpus_path)
+        dev_rows = load_dev_queries()
+        corpus_by_id = {r["passage_id"]: r for r in full_corpus}
+
+        # Filter dev rows to those whose positive is in the corpus.
+        dev_rows = [r for r in dev_rows if r["positive_passage_id"] in corpus_by_id]
+        print(f"[eval] dev rows with positive in corpus: {len(dev_rows)}")
+
+        # Subset queries.
+        max_q = args.max_queries or len(dev_rows)
+        if max_q < len(dev_rows):
+            random.seed(42)
+            dev_rows = random.sample(dev_rows, max_q)
+        print(f"[eval] using {len(dev_rows)} queries")
+
+        # Build corpus subset: all positives + random fill.
+        positive_ids = {r["positive_passage_id"] for r in dev_rows}
+        positive_passages = [corpus_by_id[pid] for pid in positive_ids]
+        other_passages = [r for r in full_corpus if r["passage_id"] not in positive_ids]
+        max_c = args.max_corpus or len(full_corpus)
+        if max_c < len(full_corpus):
+            random.seed(42)
+            need = max(0, max_c - len(positive_passages))
+            other_passages = random.sample(other_passages, min(need, len(other_passages)))
+        corpus_subset = positive_passages + other_passages
+        print(f"[eval] corpus subset: {len(corpus_subset)} passages "
+              f"({len(positive_passages)} positives + {len(other_passages)} others)")
+
+        # Write subset corpus to a temp file.
+        subset_path = REPO_ROOT / args.index_dir / "corpus_subset.json"
+        subset_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(subset_path, "w", encoding="utf-8") as f:
+            json.dump(corpus_subset, f)
+        corpus_path = subset_path
+        print(f"[eval] wrote subset corpus to {subset_path}")
+    else:
+        dev_rows = None
+
     metrics = run_real_corpus_eval(
         model_path=args.model,
         corpus_path=corpus_path,
         index_dir=REPO_ROOT / args.index_dir,
         index_name=args.index_name,
+        dev_rows=dev_rows,
         k=args.k,
         batch_size=args.batch_size,
         override_index=not args.no_override_index,

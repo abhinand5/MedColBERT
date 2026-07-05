@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Weights & Biases local offline runs
+wandb/
+
 # C extensions
 *.so
 

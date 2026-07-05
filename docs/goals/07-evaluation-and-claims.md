@@ -123,6 +123,15 @@ Avoid:
 - Efficiency is reported.
 - Claims are benchmark-scoped.
 
+## Status
+
+- Real-corpus retrieval gate (PubMed 66k passages / 5,967 dev queries):
+  **DONE**. MedColBERT-base-v1 Recall@100 = 0.971 vs BM25 0.626. Full
+  results in [docs/phase6-training-results.md](../phase6-training-results.md).
+  This is necessary but not sufficient for the Evaluation gate.
+- Remaining for the Evaluation gate: required baseline table (especially
+  the no-ontology ColBERT control), vocab-shift slices, decontamination.
+
 ## Common Mistakes
 
 - Do not tune prompts or data generation against the test set.

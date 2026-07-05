@@ -61,7 +61,7 @@ Proceed from one phase to the next only when the gate passes.
 | Corpus gate | At least one public passage corpus is ingested with stable IDs, source metadata, and decontamination fingerprints. |
 | Synthetic gate | Pilot generated examples show vocabulary shift, answerability, target concept coverage, and acceptable manual audit quality. |
 | Triplet gate | Negatives are medically meaningful and false-negative rate is acceptable in manual samples. |
-| Training gate | BioClinical-ColBERT baseline and MedColBERT both train without numerical failures and retrieve positives in sanity checks. |
+| Training gate | BioClinical-ColBERT baseline and MedColBERT both train without numerical failures and retrieve positives in sanity checks. **PASSED** — see [docs/phase6-training-results.md](docs/phase6-training-results.md). MedColBERT-base trained 5 epochs CachedContrastive on 711k triplets, full-corpus Recall@100 = 0.971 vs BM25 0.626. BioClinical-no-ontology control still pending (Phase 7). |
 | Evaluation gate | MedColBERT beats the no-ontology ColBERT control and at least one strong biomedical baseline on an important vocabulary-shift slice. |
 | Release gate | Public release contains no UMLS/SNOMED-derived restricted string tables and includes complete provenance. |
 

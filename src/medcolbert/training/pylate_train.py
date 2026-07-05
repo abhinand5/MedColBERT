@@ -15,6 +15,7 @@ when the cached loss is used.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,22 @@ from sentence_transformers import (
 )
 
 from pylate import evaluation, losses, models, utils
+
+
+def wandb_enabled() -> bool:
+    """True if wandb should report (WANDB_API_KEY set and wandb importable)."""
+    return bool(os.environ.get("WANDB_API_KEY"))
+
+
+def enable_wandb_reporting(stage_cfg: StageConfig) -> StageConfig:
+    """Flip ``report_to`` to wandb if WANDB_API_KEY is set; else leave as-is.
+
+    The wandb project is read from ``WANDB_PROJECT`` by the HF Trainer. The
+    run name is the stage's ``run_name`` passed to ``build_trainer``.
+    """
+    if wandb_enabled():
+        stage_cfg.report_to = ["wandb"]
+    return stage_cfg
 
 
 @dataclass
@@ -49,6 +66,9 @@ class StageConfig:
     save_steps: int
     eval_steps: int
     logging_steps: int
+    report_to: list[str]
+    save_strategy: str  # "steps" | "epoch"
+    save_total_limit: int
 
     @property
     def effective_batch(self) -> int:
@@ -83,6 +103,7 @@ def resolve_stage(
         grad_accum = 1
 
     outputs = merged_cfg.get("outputs", {}) or {}
+    report_to = block.get("report_to", ["none"])
     return StageConfig(
         learning_rate=block.get("learning_rate", 1e-5),
         per_device_train_batch_size=block.get("per_device_train_batch_size", 16),
@@ -102,6 +123,9 @@ def resolve_stage(
         save_steps=block.get("save_steps", outputs.get("save_steps", 10000)),
         eval_steps=block.get("eval_steps", outputs.get("eval_steps", 5000)),
         logging_steps=block.get("logging_steps", 20),
+        report_to=report_to,
+        save_strategy=block.get("save_strategy", "steps"),
+        save_total_limit=block.get("save_total_limit", 3),
     )
 
 
@@ -165,14 +189,18 @@ def build_training_args(
         bf16=stage_cfg.bf16,
         fp16=stage_cfg.fp16,
         gradient_checkpointing=stage_cfg.gradient_checkpointing,
-        save_steps=stage_cfg.save_steps,
         eval_strategy=eval_strategy,
         eval_steps=stage_cfg.eval_steps,
         logging_steps=stage_cfg.logging_steps,
-        save_total_limit=3,
-        report_to=[],
+        save_total_limit=stage_cfg.save_total_limit,
+        report_to=stage_cfg.report_to,
         dataloader_drop_last=True,
     )
+    if stage_cfg.save_strategy == "epoch":
+        kwargs["save_strategy"] = "epoch"
+    else:
+        kwargs["save_strategy"] = "steps"
+        kwargs["save_steps"] = stage_cfg.save_steps
     if stage_cfg.max_steps is not None:
         kwargs["max_steps"] = stage_cfg.max_steps
         kwargs.pop("num_train_epochs", None)
