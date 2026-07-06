@@ -10,23 +10,35 @@ training completion through paper submission and public release.
 **Primary principle:** no claim without evidence, no evidence without a
 baseline control, no baseline control without a comparable compute budget.
 
+**Venue reality (see section 14 for the full ladder):** This is a
+recipe paper, not a method paper. The upper bound is **SIGIR main track**
+if (and only if) MedColBERT tops at least one public MTEB medical retrieval
+leaderboard *and* the no-ontology ablation isolates the mechanism. The
+realistic floor is **arXiv + a workshop** (BioNLP / ClinicalNLP). The
+deciding experiment is **MTEB / R2MED public retrieval benchmarks**, run
+first — before the no-ontology data generation — because the public
+leaderboard result determines whether the rest of the plan is worth
+executing at the "ECIR / CIKM / SIGIR" level or the "workshop" level.
+
 ---
 
 ## Table of Contents
 
 1. [Where we are now](#1-where-we-are-now)
-2. [Critical path: the no-ontology control](#2-critical-path-the-no-ontology-control)
-3. [Required baseline table](#3-required-baseline-table)
-4. [External benchmark suite](#4-external-benchmark-suite)
-5. [Vocabulary-shift slice evaluation](#5-vocabulary-shift-slice-evaluation)
-6. [Decontamination report](#6-decontamination-report)
-7. [Efficiency table](#7-efficiency-table)
-8. [Additional model variants (optional, deferred)](#8-additional-model-variants-optional-deferred)
-9. [Release artifacts and audit](#9-release-artifacts-and-audit)
-10. [Paper evidence package](#10-paper-evidence-package)
-11. [Concrete task breakdown and ordering](#11-concrete-task-breakdown-and-ordering)
-12. [Risks and gates](#12-risks-and-gates)
-13. [Artifacts manifest](#13-artifacts-manifest)
+2. [Public retrieval benchmarks — the venue-determining experiment](#2-public-retrieval-benchmarks--the-venue-determining-experiment)
+3. [Critical path: the no-ontology control](#3-critical-path-the-no-ontology-control)
+4. [Required baseline table](#4-required-baseline-table)
+5. [External benchmark suite](#5-external-benchmark-suite)
+6. [Vocabulary-shift slice evaluation](#6-vocabulary-shift-slice-evaluation)
+7. [Decontamination report](#7-decontamination-report)
+8. [Efficiency table](#8-efficiency-table)
+9. [Additional model variants (optional, deferred)](#9-additional-model-variants-optional-deferred)
+10. [Release artifacts and audit](#10-release-artifacts-and-audit)
+11. [Paper evidence package](#11-paper-evidence-package)
+12. [Concrete task breakdown and ordering](#12-concrete-task-breakdown-and-ordering)
+13. [Risks and gates](#13-risks-and-gates)
+14. [Venue targeting ladder](#14-venue-targeting-ladder)
+15. [Artifacts manifest](#15-artifacts-manifest)
 
 ---
 
@@ -69,11 +81,12 @@ baseline control, no baseline control without a comparable compute budget.
 
 ### Not done (everything this plan covers)
 
+- **Public retrieval benchmarks** (MTEB Medical, R2MED, RTEB-Health) —
+  the venue-determining experiment, run **first** (section 2)
 - No-ontology ColBERT control (mandatory ablation)
 - Required baseline suite (BM25+RM3, strong dense, MedCPT, BMRetriever,
   generic ColBERT)
-- External benchmark evaluation (R2MED, TREC Clinical Trials,
-  PMC-Patients, BEIR biomedical tasks)
+- Other external benchmarks (TREC Clinical Trials, PMC-Patients, BioASQ)
 - Vocabulary-shift slice analysis
 - Decontamination report
 - Efficiency table
@@ -82,9 +95,126 @@ baseline control, no baseline control without a comparable compute budget.
 
 ---
 
-## 2. Critical path: the no-ontology control
+## 2. Public retrieval benchmarks — the venue-determining experiment
 
-### Why this is the single most important deliverable
+### Why this runs first
+
+The internal real-corpus gate (0.971 vs BM25 0.626) is a sanity check,
+not a result. It compares against BM25 only, on a held-out split of our
+own synthetic generator, with bucket labels we generated ourselves. To
+know whether MedColBERT is a real result or a fine-tuning artifact, we
+need **public, third-party benchmarks with established leaderboards**.
+
+The [MTEB leaderboard](https://huggingface.co/spaces/mteb/leaderboard)
+maintains a **Medical** subdomain benchmark (`MTEB(Medical, v1)`) that
+aggregates 12 medical tasks across retrieval, clustering, and reranking.
+Sibling benchmarks **R2MED** (8 reasoning-driven medical retrieval tasks)
+and **RTEB(Health, beta)** (4 healthcare retrieval tasks) are pure
+retrieval and directly comparable to ColBERT.
+
+Running these is **the highest-information-per-hour experiment in the
+plan**. Within a few hours of GPU time on one L40S, we will know whether
+MedColBERT-base is fighting for a SIGIR main-track paper or a workshop
+paper. This decision drives every downstream priority.
+
+### Architectural limitation — ColBERT cannot top MTEB(Medical, v1)
+
+ColBERT produces **token-level** embeddings, not a single pooled
+sentence vector. This means it can only compete on **retrieval** tasks.
+The 12 tasks in MTEB(Medical, v1) break down as:
+
+| Task | Type | ColBERT eligible? |
+|---|---|---|
+| CUREv1 | Retrieval (eng/fra/spa) | ✅ English split only |
+| NFCorpus | Retrieval (eng) | ✅ |
+| TRECCOVID | Retrieval (eng) | ✅ |
+| TRECCOVID-PL | Retrieval (pol) | ❌ English-only backbone |
+| SciFact | Retrieval (eng) | ✅ |
+| SciFact-PL | Retrieval (pol) | ❌ |
+| MedicalQARetrieval | Retrieval (eng) | ✅ |
+| PublicHealthQA | Retrieval (8 langs) | ❌ English-only |
+| MedrxivClusteringP2P.v2 | Clustering | ❌ No pooled vector |
+| MedrxivClusteringS2S.v2 | Clustering | ❌ No pooled vector |
+| CmedqaRetrieval | Retrieval (cmn) | ❌ English-only |
+| CMedQAv2-reranking | Reranking | ❌ Not a cross-encoder |
+
+**We cannot top the aggregate MTEB(Medical, v1) leaderboard.** MTEB
+treats missing tasks as 0, and 0s on 5-6 tasks sink the category average
+regardless of how strong our retrieval scores are.
+
+We can compete on:
+1. **The English retrieval subset** of MTEB(Medical, v1): NFCorpus,
+   TRECCOVID, SciFact, MedicalQARetrieval, CUREv1 (English split) — 5
+   tasks. Report these as a per-task table in the paper.
+2. **R2MED** — 8 tasks, all English, all retrieval, all medical
+   reasoning. This is the gold target. SOTA on R2MED is a standalone
+   result.
+3. **RTEB(Health, beta)** — 4 retrieval tasks (ChatDoctor, CUREv1,
+   EnglishHealthcare, GermanHealthcare — we take the English ones).
+
+### What we're competing against
+
+The medical retrieval leaderboards are dominated by **7B+ parameter
+models** (NV-Embed-v2, voyage-3-large, bge-multilingual). A 150M or 396M
+ColBERT will not beat them on raw aggregate score across all tasks.
+Realistic per-task targets:
+
+| Task | Realistic target | Why |
+|---|---|---|
+| NFCorpus | Plausible top — small medical queries, short abstracts; ColBERT-style late interaction is historically strong here | |
+| SciFact | Plausible top-3 — claim verification, abstracts, short queries | |
+| TRECCOVID | Competitive but tough — established benchmark, many strong entries | |
+| MedicalQARetrieval | Tough — 2048 QA pairs, dense models often win on QA-style | |
+| CUREv1 | Plausible — newer benchmark, less saturated | |
+| R2MED (8 tasks) | Variable — reasoning-driven; this is where the ontology recipe *could* pay off most | |
+
+### Implementation
+
+Use the `mteb` Python package directly:
+
+```python
+import mteb
+from pylate import models
+
+model = models.ColBERT("runs/base_stage2/final")
+tasks = mteb.get_tasks(tasks=[
+    "NFCorpus", "TRECCOVID", "SciFact", "MedicalQARetrieval",
+    "CUREv1",  # MTEB(Medical, v1) English retrieval subset
+    # R2MED tasks:
+    "R2MEDBiologyRetrieval", "R2MEDBioinformaticsRetrieval",
+    "R2MEDMedicalSciencesRetrieval", "R2MEDMedXpertQAExamRetrieval",
+    "R2MEDMedQADiagRetrieval", "R2MEDPMCTreatmentRetrieval",
+    "R2MEDPMCClinicalRetrieval", "R2MEDIIYiClinicalRetrieval",
+])
+results = mteb.evaluate(model, tasks=tasks, output_folder="runs/eval/mteb_base")
+```
+
+ColBERT is not a native MTEB model wrapper. We may need a thin adapter
+(`src/medcolbert/eval/mteb_adapter.py`) that wraps a pylate ColBERT
+model in MTEB's `Encoder` protocol so `mteb.evaluate` can call it. This
+is the one piece of new code this phase requires — see task M1 in
+section 12.
+
+### Decision gate after public benchmarks
+
+| Outcome | Implication |
+|---|---|
+| MedColBERT-base tops 1+ medical retrieval task AND is top-3 on 3+ others | Push for SIGIR / ACL main track. The MTEB leaderboard is the headline evidence. Proceed with no-ontology ablation + vocab-shift as the mechanism story. |
+| MedColBERT-base is top-5 on 2+ tasks, competitive on the rest | ECIR / CIKM / Findings target. The public numbers are real but not dominant — the ablation and vocab-shift analysis must carry the mechanism story. |
+| MedColBERT-base is "competitive but not best" everywhere | Workshop / arXiv. The internal gate was a fine-tuning artifact, not a research result. Still publishable as a systems paper. |
+| MedColBERT-base underperforms BGE-large or MedCPT on the public benchmarks | The internal gate does not generalize. Pivot immediately to diagnosing why (corpus overlap? domain mismatch?) before investing further in ablations. |
+
+This gate must be decided **before** the no-ontology data generation
+(Phase A in the old plan), because if the public number is dead, the
+ablation doesn't matter for venue purposes. The no-ontology control is
+still needed for the *mechanism* claim, but its priority relative to
+other work depends on the venue target.
+
+---
+
+## 3. Critical path: the no-ontology control
+
+### Why this is the single most important *mechanism* deliverable
 
 The core MedColBERT research claim, from [GOALS.md](GOALS.md), is:
 
@@ -104,9 +234,15 @@ synthetic supervision. AGENTS.md is explicit:
 Without this control, the project has a fine-tuned model, not a research
 result. The 0.971 Recall@100 could be entirely attributable to the
 BioClinical-ModernBERT backbone being strong, not to the ontology recipe.
-**This run must complete before any paper writing, and ideally before
-investing in external benchmarks** — if the no-ontology control matches
-MedColBERT, the research claim collapses and the framing must change.
+
+**Note on ordering:** This section was previously marked as the
+critical-path-first deliverable. The MTEB insight reorders it: public
+benchmarks (section 2) run first because they determine the venue, and
+the venue determines how much to invest in the mechanism story. The
+no-ontology control is still mandatory for any mechanism claim, but it
+is now sequenced *after* the public benchmark gate so we don't spend
+~14h of GPU time on a control whose framing depends on a public result
+we haven't measured yet.
 
 ### What "no-ontology" means concretely
 
@@ -192,7 +328,7 @@ no-ontology dataset, either:
   This is a five-line change and avoids duplicating the config.
 
 Prefer (b) — a CLI flag is cleaner than a config fork. This is a concrete
-code task in section 11.
+code task in section 12.
 
 ### Decision gate after no-ontology run
 
@@ -200,7 +336,7 @@ After the no-ontology model is evaluated on the same real-corpus gate:
 
 | Outcome | Implication |
 |---|---|
-| MedColBERT-base beats no-ontology by a clear margin on Recall@100 and MRR@10 | Research claim supported. Proceed to baselines, external benchmarks, vocab-shift, paper. |
+| MedColBERT-base beats no-ontology by a clear margin on Recall@100 and MRR@10 | Mechanism claim supported. Proceed to vocab-shift analysis, baselines, paper. |
 | No-ontology matches or beats MedColBERT | Backbone is what matters; the ontology recipe is not the source of gain. Pivot framing to "BioClinical-ModernBERT as a strong medical retriever backbone, with a recipe and suite that others can reuse." Still publishable as a systems paper. |
 | No-ontology is close but MedColBERT wins specifically on vocab-shift buckets | Strongest possible result. Proceed with the vocab-shift analysis as the headline claim. |
 
@@ -209,7 +345,7 @@ before claiming any mechanism-level improvement.
 
 ---
 
-## 3. Required baseline table
+## 4. Required baseline table
 
 ### Source: AGENTS.md and docs/goals/07-evaluation-and-claims.md
 
@@ -223,7 +359,7 @@ The required baselines, in priority order:
 | 4 | MedCPT (or another biomedical dense baseline) | dense | TODO | Domain-specific dense; reported as a baseline, not an oracle (per AGENTS.md) |
 | 5 | BMRetriever (when practical) | dense | TODO | Another biomedical dense baseline |
 | 6 | Generic ColBERT / PyLate (off-the-shelf, no fine-tuning) | late interaction | TODO | Does late interaction alone help, without medical fine-tuning? |
-| 7 | BioClinical-ColBERT-no-ontology | late interaction | TODO (section 2) | **Mandatory** — isolates the ontology recipe from the backbone |
+| 7 | BioClinical-ColBERT-no-ontology | late interaction | TODO (section 3) | **Mandatory** — isolates the ontology recipe from the backbone |
 | 8 | MedColBERT-base | late interaction | DONE | The proposed method |
 | 9 | MedColBERT-large | late interaction | IN PROGRESS | Scaling claim |
 | 10 | BM25 + MedColBERT hybrid via RRF | hybrid | OPTIONAL | Does fusion help? |
@@ -259,11 +395,11 @@ via cosine / dot-product top-k, then calls the same
 The metric functions are already pure and model-agnostic; only the
 encode-and-retrieve step differs.
 
-This is a concrete code task in section 11.
+This is a concrete code task in section 12.
 
 ---
 
-## 4. External benchmark suite
+## 5. External benchmark suite
 
 ### Why we need this
 
@@ -317,12 +453,12 @@ TREC-COVID and BioASQ both have `train_contamination_block: true` and
 external-benchmark numbers, verify that the benchmark corpus passages
 do not overlap with the MedColBERT training corpus (the 66,108 PubMed
 passages the v1 triplets were built on). Run a decontamination check
-(section 6) and exclude any contaminated eval queries from the reported
+(section 7) and exclude any contaminated eval queries from the reported
 numbers, with a count of how many were excluded.
 
 ---
 
-## 5. Vocabulary-shift slice evaluation
+## 6. Vocabulary-shift slice evaluation
 
 ### Why this is the spine of the paper
 
@@ -399,7 +535,7 @@ Defer until the first slice table is computed.
 
 ---
 
-## 6. Decontamination report
+## 7. Decontamination report
 
 ### Why
 
@@ -456,7 +592,7 @@ metrics with a documented count.
 
 ---
 
-## 7. Efficiency table
+## 8. Efficiency table
 
 ### Required (docs/goals/07)
 
@@ -465,7 +601,7 @@ metrics with a documented count.
   66k corpus
 - Encoding throughput (queries/sec, docs/sec) for each model
 - MRL dim 32 / 64 / 128 tradeoff if MRL is enabled (deferred — see
-  section 8)
+  section 9)
 
 ### What to measure
 
@@ -491,18 +627,18 @@ indexes already exist.
 
 ---
 
-## 8. Additional model variants (optional, deferred)
+## 9. Additional model variants (optional, deferred)
 
 docs/goals/06 lists five required model variants. The current
 state covers #3 (`medcolbert_ontology_grounded` — DONE) and will cover
-#2 (`bioclinical_colbert_no_ontology` — section 2). The remaining
+#2 (`bioclinical_colbert_no_ontology` — section 3). The remaining
 variants are optional and should be deferred until after the base
 ablations support the hypothesis.
 
 | Variant | Status | When to do |
 |---|---|---|
 | `generic_colbert` | TODO (baseline table) | Section 3 — no training, just evaluate an off-the-shelf ColBERT |
-| `bioclinical_colbert_no_ontology` | TODO (section 2) | Critical path — do first |
+| `bioclinical_colbert_no_ontology` | TODO (section 3) | Critical path — do first |
 | `medcolbert_ontology_grounded` | DONE (base) + IN PROGRESS (large) | — |
 | `medcolbert_teacher_filtered` | DEFERRED | Only if the ontology grounding shows a clear win and we want to isolate the LLM-reranker contribution |
 | `medcolbert_dense_negative_refresh` | DEFERRED | Only if the first gate underperforms and v2 data is needed |
@@ -516,7 +652,7 @@ ablation rather than the primary result.
 
 ---
 
-## 9. Release artifacts and audit
+## 10. Release artifacts and audit
 
 ### Source: docs/goals/08-release-and-paper.md
 
@@ -590,7 +726,7 @@ memorization of restricted UMLS/SNOMED strings:
 
 ---
 
-## 10. Paper evidence package
+## 11. Paper evidence package
 
 ### Source: docs/goals/08 §Paper Evidence Package
 
@@ -649,13 +785,61 @@ Avoid: "Dense retrieval cannot solve medical synonymy."
 
 ---
 
-## 11. Concrete task breakdown and ordering
+## 12. Concrete task breakdown and ordering
 
 The tasks below are ordered by dependency, not by phase. Each task is
 meant to be one manageable unit of work.
 
-### Phase A — Ablation harness (start immediately, in parallel with
-the large training run since these are CPU / data / code tasks)
+### Phase M — Public retrieval benchmarks (FIRST — venue-determining)
+
+**M1. Build the MTEB ColBERT adapter**
+
+`src/medcolbert/eval/mteb_adapter.py` — wrap a pylate `models.ColBERT`
+in MTEB's `Encoder` protocol so `mteb.evaluate` can call it. The adapter
+must:
+1. Accept `model.encode(texts, prompt_name="query")` and
+   `model.encode(texts, prompt_name="passage")` (MTEB's retrieval task
+   protocol distinguishes query vs passage encoding)
+2. Return a single vector per text (for dense comparison) **or** a list
+   of token vectors (for ColBERT late interaction — this is the path
+   MTEB's PLAID/Jina-ColBERT wrappers use)
+3. Handle the length-mode overrides from `configs/eval.yaml`
+
+Check whether MTEB already has a ColBERT model wrapper we can subclass
+(`mteb.models.ColBERTWrapper` or similar). If not, the adapter is
+~50 lines.
+
+**M2. Run MedColBERT-base on MTEB Medical retrieval subset + R2MED**
+
+```bash
+uv run python scripts/eval/run_mteb.py \
+  --model runs/base_stage2/final \
+  --tasks medical_retrieval,r2med \
+  --output-dir runs/eval/mteb_base
+```
+
+Targets: NFCorpus, TRECCOVID, SciFact, MedicalQARetrieval, CUREv1
+(MTEB Medical English retrieval subset) + 8 R2MED tasks. Writes one
+JSON per task to `runs/eval/mteb_base/`.
+
+**M3. Run MedColBERT-large on the same tasks** (after large training
+completes).
+
+**M4. Run at least one dense baseline on the same tasks** — BGE-large-en-v1.5
+and MedCPT. This is the comparison row that tells us whether the public
+ranking is real.
+
+**M5. Pull current leaderboard top-5 per task** from the live MTEB
+leaderboard (or via the `mteb` package results cache). We need to know
+the exact number to beat. Document in `runs/eval/leaderboard_targets.json`.
+
+**M6. Decision gate** — see section 2's decision table. Decide the
+venue target based on the public benchmark results. This determines
+how much to invest in the no-ontology control, vocab-shift slices, and
+the rest of the plan.
+
+### Phase A — Ablation harness (after Phase M gate, in parallel with
+remaining work since data generation is CPU/LLM-bound)
 
 **A1. Add `--hf-dataset` flag to `stage2_colbert_finetune.py`**
 
@@ -731,7 +915,7 @@ uv run python scripts/eval/run_real_corpus.py \
 **A6. Decision gate**
 
 Compare MedColBERT-base vs no-ontology on the real-corpus gate. Decide
-which framing the paper takes (per the table in section 2). Document this
+which framing the paper takes (per the table in section 3). Document this
 decision in `docs/ablation_decision.md`.
 
 ### Phase B — Baselines and unified eval harness
@@ -833,7 +1017,7 @@ and document the exclusion count in the paper.
 
 ### Phase F — Efficiency
 
-**F1. Build `scripts/eval/efficiency.py`** (see section 7).
+**F1. Build `scripts/eval/efficiency.py`** (see section 8).
 
 **F2. Run for every model variant.** Write
 `runs/eval/efficiency_<model>.json`.
@@ -847,7 +1031,7 @@ UMLS-string reproduction. Write `runs/release/memorization_audit.json`.
 
 **G2. Build the model card** — `docs/model_card.md` (or
 `runs/large_stage2/final/MODEL_CARD.md`). Cover the 10 required sections
-from section 9.
+from section 10.
 
 **G3. Scan public artifacts for private leakage** — grep the repo and
 the release bundle for restricted paths, UMLS file names, restricted
@@ -870,20 +1054,22 @@ come from committed JSON in `runs/eval/`.
 **H2. Generate MaxSim alignment qualitative examples.**
 
 **H3. Write the paper**, answering the 8 reviewer questions
-in-line (section 10).
+in-line (section 11).
 
 **H4. Internal review with an LLM co-researcher** (per AGENTS.md, an
 open LLM may red-team claims and review the eval tables).
 
 ---
 
-## 12. Risks and gates
+## 13. Risks and gates
 
 ### Research risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| No-ontology control matches MedColBERT on the real-corpus gate | Medium | Critical — research claim collapses | Run the control first (Phase A). Pivot framing if it happens. |
+| **MedColBERT-base underperforms on public MTEB/R2MED benchmarks** | **Medium** | **Critical — caps venue at workshop/arXiv; the internal gate does not generalize** | **Run public benchmarks FIRST (Phase M) before investing in the no-ontology data generation. If the public number is dead, diagnose why (corpus overlap? domain mismatch?) before spending GPU time on ablations.** |
+| **ColBERT cannot top MTEB(Medical, v1) aggregate due to missing clustering/reranking/multilingual tasks** | **Certain** | **Cannot claim #1 on the headline leaderboard** | **Compete on the English-retrieval subset and on R2MED (pure retrieval, all English). Report per-task numbers, not the aggregate. The paper targets per-task SOTA, not the MTEB category-average.** |
+| No-ontology control matches MedColBERT on the real-corpus gate | Medium | Critical — mechanism claim collapses | Run the control (Phase A) after the public benchmark gate. Pivot framing if it happens. |
 | No-ontology control is itself very strong on shift buckets | Low-Medium | Weakens the mechanism claim | The vocab-shift slice analysis is the deciding evidence. If the control is strong on average but weak on `no_direct_lexical_overlap`, the claim still holds at the slice level. |
 | External benchmarks don't show gains vs published baselines | Medium | Limits the "competitive or SOTA" claim | The claim is benchmark-scoped. Even if MedColBERT is not SOTA on TREC-COVID, it can be the strongest late-interaction model on the internal real-corpus gate and the published biomedical tasks. Scope the claims accordingly. |
 | Decontamination finds overlap | Low | Requires re-running evals after excluding contaminated examples | Run decontamination early (Phase E can start once the eval corpus is fixed). |
@@ -894,15 +1080,17 @@ open LLM may red-team claims and review the eval tables).
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| No-ontology dataset generation is slow (LLM at scale) | High | Schedule slip | Start Phase A2 immediately in parallel with the large training. Pilot at 1k first to validate the prompt before committing to 711k. |
-| External benchmark code is fiddly (BEIR split conventions vary) | Medium | Schedule slip | Defer BioASQ and R2MED to a second pass if the first three (NFCorpus, SciFact, TREC-COVID) work cleanly. |
-| GPU contention (only one L40S) | High | Sequential training runs | Sequencing is forced: the no-ontology base run (14h) and the no-ontology large run (23h) cannot run while the current large run is on the GPU. Plan serial training windows. |
+| **MTEB ColBERT adapter is non-trivial (PLAID retrieval vs dense encode protocol mismatch)** | **Medium** | **Schedule slip for Phase M** | **Check if MTEB ships a ColBERT wrapper first. If not, the adapter is ~50 lines — the ColBERT model already encodes queries/passages; the adapter just routes MTEB's `encode` calls to `pylate.models.ColBERT.encode` with the right `is_query` flag.** |
+| No-ontology dataset generation is slow (LLM at scale) | High | Schedule slip | Start Phase A2 after the Phase M gate. Pilot at 1k first to validate the prompt before committing to 711k. |
+| External benchmark code is fiddly (BEIR split conventions vary) | Medium | Schedule slip | Defer BioASQ and TREC-CT to a second pass if the first three (NFCorpus, SciFact, TRECCOVID) work cleanly. |
+| GPU contention (only one L40S) | High | Sequential training runs | Sequencing is forced: the no-ontology base run (14h) and the no-ontology large run (23h) cannot run while the current large run is on the GPU. Plan serial training windows. Phase M (benchmark eval) also needs GPU but is read-only — can run on the same GPU if training is paused. |
 
 ### Gates
 
 | Gate | Required evidence | What unblocks |
 |---|---|---|
-| No-ontology gate (A6) | No-ontology model evaluated on the real-corpus gate, side-by-side with MedColBERT-base | Paper framing decision, vocab-shift analysis, baseline table |
+| **Public benchmark gate (M6)** | **MedColBERT-base + at least one dense baseline evaluated on MTEB Medical retrieval subset + R2MED. Decision table from section 2 filled in.** | **Venue decision (SIGIR / ECIR-CIKM / workshop). Determines how much to invest in the rest of the plan.** |
+| No-ontology gate (A6) | No-ontology model evaluated on the real-corpus gate, side-by-side with MedColBERT-base | Mechanism claim, paper framing, vocab-shift analysis |
 | Baseline gate (B6) | All required baselines evaluated on the real-corpus gate with the same dev queries | Main benchmark table draft |
 | External benchmark gate (C4) | All enabled benchmarks run for MedColBERT and at least one baseline | "Competitive or SOTA" claim |
 | Vocab-shift gate (D3) | Per-bucket metrics for MedColBERT, no-ontology control, and BM25 | Mechanism claim, headline paper result |
@@ -913,7 +1101,74 @@ open LLM may red-team claims and review the eval tables).
 
 ---
 
-## 13. Artifacts manifest
+## 14. Venue targeting ladder
+
+### Honest assessment of what this paper is
+
+This is a **recipe paper**, not a method paper:
+- **No new architecture** — ColBERT + ModernBERT is a known combination
+- **No new backbone** — BioClinical-ModernBERT is Sounack et al. 2025 (a strong arXiv preprint, not yet a top-venue paper)
+- **The contribution is a training recipe** — ontology-controlled synthetic supervision over real passages, with a matched-compute ablation
+
+That is a known recipe type ("fine-tune a backbone on synthetic data") with one twist (UMLS control over generation). Reviewers at top venues see this pattern constantly. The 0.971 vs 0.626 internal gate is a promising sanity check, not a result — it's against BM25 only, on an internal held-out split from our own synthetic generator.
+
+### The venue ladder
+
+| Venue | Probability | What it requires |
+|---|---|---|
+| **arXiv preprint** | Always | Clean writing. No peer-review signal. |
+| **BioNLP / ClinicalNLP workshop** (ACL/NAACL/ECL) | High (75-85%) | Solid execution + clean ablation. Natural home. |
+| **SIGIR / ACL / EMNLP workshop** | High (70-80%) | Same. |
+| **ACL/EMNLP/NAACL Findings** | Medium (40-50%) | Strong ablation + at least 2 external benchmark wins + careful claim wording. Findings accepts "good empirical work that doesn't clear the novelty bar." |
+| **ECIR / CIKM** (mid-tier) | Medium (40-55%) | Similar to Findings. More receptive to thorough empirical/systems papers than top venues. |
+| **SIGIR / ACL / EMNLP main track** | Low (<15%) | Requires either a new benchmark that becomes community-standard, a surprise empirical finding, or architectural novelty. Achievable **only if** MedColBERT tops at least one public MTEB medical retrieval leaderboard *and* the no-ontology ablation shows a surprisingly large ontology-controlled gap. |
+| **NeurIPS / ICLR** | Near-zero | No methodological innovation, no theory, no new learning algorithm. Don't waste cycles here. |
+
+### What the MTEB opportunity changes
+
+Before considering MTEB, the realistic ceiling was "ACL/EMNLP Findings at best." A **per-task SOTA on a public MTEB medical retrieval leaderboard** — even on a subset — is verifiable by anyone, community-recognized, and lifts the project out of "internal eval" territory. Specifically:
+
+| Outcome (on public benchmarks) | Venue target |
+|---|---|
+| Win 1-2 medical retrieval tasks on MTEB(Medical) or R2MED, with the no-ontology ablation showing the ontology recipe matters | **ECIR / CIKM** — real shot. Mid-tier but respectable. |
+| Top R2MED overall AND beat NV-Embed / BGE-large on 2+ medical retrieval tasks + vocab-shift slice concentration | **SIGIR short paper or ACL Findings** — plausible. |
+| Top the R2MED leaderboard overall AND beat NV-Embed on 2+ medical tasks + a manually-labeled vocab-shift benchmark | **SIGIR full paper** — possible. This is the upper bound. |
+| Anything short of topping at least one public benchmark | Workshop / arXiv only. |
+
+### The three probability drivers, in priority order
+
+The paper's fate hinges on three unknowns:
+
+1. **Do public MTEB/R2MED benchmarks show MedColBERT is competitive?** — Run FIRST (Phase M). If MedColBERT doesn't beat BGE-large or MedCPT on NFCorpus, the rest is moot. This is the highest-information experiment per hour of compute.
+
+2. **Does the no-ontology control show a meaningful gap?** — If the gap is small or zero → mechanism claim collapses → paper becomes "we fine-tuned a backbone" → workshop or arXiv only. If the gap is large AND concentrated on vocab-shift buckets → real mechanism story → mid-tier or Findings plausible.
+
+3. **Is there a manually-validated vocab-shift benchmark?** — LLM-labeled slices are circular. Reviewers will hammer this. A small (100-500 examples) hand-labeled vocab-shift benchmark is the single highest-leverage thing for paper credibility. Even tiny, manual labels are unimpeachable.
+
+### Concrete playbook to crack a respectable venue
+
+1. **Run public benchmarks first.** Before the no-ontology data generation. Phase M is the venue gate.
+2. **Run MedCPT and BGE-large on your internal gate.** If MedCPT gets 0.95 Recall@100 on your 66k corpus, your 0.971 is not impressive. If MedCPT gets 0.80 and you get 0.97, you have a result.
+3. **Only then build the no-ontology control.** Frame the paper around the ablation, not the absolute number.
+4. **Build a small hand-labeled vocab-shift benchmark.** 100-300 examples, manually bucketed by a human, not an LLM. This is gold for paper credibility.
+5. **Add at least one non-PubMed domain.** PMC-Patients or TREC Clinical Trials. PubMed-only is an easy reject — "you trained on PubMed and tested on PubMed."
+6. **Show qualitative MaxSim alignment examples.** The heart-attack → myocardial-infarction token alignment visualizations are 5× more persuasive than a metric table. Reviewers remember them.
+7. **Claim wording:** "Ontology-controlled synthetic supervision transfers to real biomedical retrieval, with the largest gains on vocabulary-shift slices" — NOT "MedColBERT is SOTA on medical retrieval."
+8. **Target ECIR, CIKM, or Findings.** Don't burn cycles on SIGIR/ACL main track unless the public benchmark wins AND the ablation gap are both large.
+
+### What would elevate it to a top-tier paper
+
+The gap between this and a SIGIR/ACL main-track paper:
+- A **new manually-validated benchmark** that becomes community-standard (MedVocabShift with hand-labeled 1k+ examples) — a contribution on its own
+- **Best results on 3+ established benchmarks** vs MedCPT, BGE-large, NV-Embed
+- A **mechanism analysis** — not just "it works" but *why* the ontology control helps (probe the projection layer, show which token alignments change, quantify the synonymy resolution)
+- A **second domain** (clinical notes, trials) showing the recipe transfers
+
+Right now we have none of these. They're achievable but each one is real work. Phase M tells us whether to pursue them.
+
+---
+
+## 15. Artifacts manifest
 
 Target layout under `runs/` after all phases complete:
 
@@ -938,6 +1193,24 @@ runs/
     eval_epoch{1,2,4,5}.json
     eval_final.json
   eval/
+    mteb_base/                       # Phase M2 — MTEB Medical + R2MED for MedColBERT-base
+      NFCorpus.json
+      TRECCOVID.json
+      SciFact.json
+      MedicalQARetrieval.json
+      CUREv1.json
+      R2MEDBiologyRetrieval.json
+      R2MEDBioinformaticsRetrieval.json
+      R2MEDMedicalSciencesRetrieval.json
+      R2MEDMedXpertQAExamRetrieval.json
+      R2MEDMedQADiagRetrieval.json
+      R2MEDPMCTreatmentRetrieval.json
+      R2MEDPMCClinicalRetrieval.json
+      R2MEDIIYiClinicalRetrieval.json
+    mteb_large/                      # Phase M3 — same tasks for MedColBERT-large
+    mteb_bge_large/                  # Phase M4 — dense baseline
+    mteb_medcpt/                      # Phase M4 — biomedical dense baseline
+    leaderboard_targets.json         # Phase M5 — current top-5 per task
     main_table.json                  # Phase C4
     vocab_shift_table.json           # Phase D2
     efficiency_table.json            # Phase F3
@@ -972,32 +1245,48 @@ runs/
 
 ## Summary
 
-The path from here to paper is not "rigorous evals and ablations
-followed by paper writing" — that framing undersells the critical-path
-risk. The single most important deliverable is the no-ontology control,
-because the research claim depends on it. Everything else (external
-benchmarks, vocab-shift slices, decontamination, efficiency, model
-card, paper) is necessary but secondary; it is downstream of the
-ablation result.
+The path from here to paper has **two critical gates**, not one:
 
-Concretely:
+1. **The public benchmark gate (Phase M).** Run MTEB Medical retrieval
+   subset + R2MED on MedColBERT-base *first*, before any new training or
+   data generation. This is the highest-information-per-hour experiment
+   in the plan. It tells us whether the internal 0.971 gate generalizes
+   or is a fine-tuning artifact, and it determines the venue target
+   (SIGIR main track, ECIR/CIKM, Findings, or workshop). If the public
+   number is dead, the rest of the plan is workshop-level and we don't
+   need the full ablation battery.
 
-1. Build and train the no-ontology control (Phase A) — this is the
-   biggest data/LLM task and the only one that can fail the research
-   claim.
-2. Build the unified eval harness (Phase B) so all baselines run through
-   the same metrics on the same corpus.
-3. Run external benchmarks (Phase C) only after the ablation result is
-   known, because the framing changes based on the ablation outcome.
-4. Compute vocab-shift slices (Phase D) — the spine of the paper.
-5. Decontamination (Phase E), efficiency (Phase F), release audit
-   (Phase G) and paper writing (Phase H) follow in that order.
+2. **The no-ontology mechanism gate (Phase A).** Train the same backbone
+   on generic (non-ontology-grounded) synthetic queries with matched
+   compute, and compare on the internal gate. This isolates whether the
+   ontology recipe — not just the backbone — is responsible for the
+   retrieval quality. Without it, no mechanism claim is possible. It
+   runs *after* Phase M because its framing (and how much to invest in
+   it) depends on the public benchmark result.
 
-The plan deliberately front-loads the risk. The no-ontology control
-should start generating data **now**, in parallel with the large
-training run, because LLM generation at scale is the slowest
-non-GPU-bound task and can run on CPU while the GPU is busy with the
-large training.
+### Revised ordering
+
+1. **Phase M — Public retrieval benchmarks** (FIRST). MTEB Medical
+   retrieval subset, R2MED, with BGE-large + MedCPT as comparison rows.
+   Venue-deciding.
+2. **Phase A — No-ontology control** (after Phase M gate). Data
+   generation is CPU/LLM-bound and can overlap with GPU-bound work.
+3. **Phase B — Unified eval harness + required baselines** on the
+   internal gate.
+4. **Phase C — Remaining external benchmarks** (TREC-CT, PMC-Patients,
+   BioASQ) for the "second domain" generalization claim.
+5. **Phase D — Vocab-shift slices** — the spine of the mechanism story.
+6. **Phase E — Decontamination**, **Phase F — Efficiency** — mechanical.
+7. **Phase G — Release audit + model card + memorization audit.**
+8. **Phase H — Paper writing**, only after all evidence exists.
+
+The plan deliberately front-loads the **venue** risk (Phase M) before
+the **mechanism** risk (Phase A), because the venue determines whether
+the mechanism story is worth telling at a top venue or just a workshop.
+Phase M can run as soon as the large training completes (or even on the
+base model now, if GPU time is available). Phase A's data generation is
+the slowest non-GPU task and should start immediately after the Phase M
+gate so it can overlap with the remaining GPU-bound eval work.
 
 Each task above is small enough to fit in a single working session, and
 the ordering respects the dependency chain so that no task is started
@@ -1006,4 +1295,4 @@ before its prerequisites are in place.
 ---
 
 **Document status:** Living document. Update task statuses as work
-proceeds; the gate table in section 12 is the operating checklist.
+proceeds; the gate table in section 13 is the operating checklist.
