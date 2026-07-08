@@ -32,7 +32,7 @@ executing at the "ECIR / CIKM / SIGIR" level or the "workshop" level.
 6. [Vocabulary-shift slice evaluation](#6-vocabulary-shift-slice-evaluation)
 7. [Decontamination report](#7-decontamination-report)
 8. [Efficiency table](#8-efficiency-table)
-9. [Additional model variants (optional, deferred)](#9-additional-model-variants-optional-deferred)
+9. [Three retrieval architectures — the cross-paradigm ablation](#9-three-retrieval-architectures--the-cross-paradigm-ablation)
 10. [Release artifacts and audit](#10-release-artifacts-and-audit)
 11. [Paper evidence package](#11-paper-evidence-package)
 12. [Concrete task breakdown and ordering](#12-concrete-task-breakdown-and-ordering)
@@ -83,6 +83,8 @@ executing at the "ECIR / CIKM / SIGIR" level or the "workshop" level.
 
 - **Public retrieval benchmarks** (MTEB Medical, R2MED, RTEB-Health) —
   the venue-determining experiment, run **first** (section 2)
+- **Dense + sparse MedEmbed variants** (Phase T, section 9) — the
+  cross-paradigm ablation; same data/backbone, three architectures
 - No-ontology ColBERT control (mandatory ablation)
 - Required baseline suite (BM25+RM3, strong dense, MedCPT, BMRetriever,
   generic ColBERT)
@@ -360,9 +362,13 @@ The required baselines, in priority order:
 | 5 | BMRetriever (when practical) | dense | TODO | Another biomedical dense baseline |
 | 6 | Generic ColBERT / PyLate (off-the-shelf, no fine-tuning) | late interaction | TODO | Does late interaction alone help, without medical fine-tuning? |
 | 7 | BioClinical-ColBERT-no-ontology | late interaction | TODO (section 3) | **Mandatory** — isolates the ontology recipe from the backbone |
-| 8 | MedColBERT-base | late interaction | DONE | The proposed method |
+| 8 | MedColBERT-base | late interaction | DONE | The proposed method (ColBERT paradigm) |
 | 9 | MedColBERT-large | late interaction | IN PROGRESS | Scaling claim |
-| 10 | BM25 + MedColBERT hybrid via RRF | hybrid | OPTIONAL | Does fusion help? |
+| 10 | MedEmbed-dense-base | dense | TODO (Phase T) | In-house dense paradigm; the only variant that can top MTEB(Medical) aggregate |
+| 11 | MedEmbed-dense-large | dense | TODO (Phase T) | Dense scaling claim |
+| 12 | MedEmbed-sparse-base | sparse | TODO (Phase T) | In-house sparse (SPLADE) paradigm; lexicaliseable baseline + RRF fusion candidate |
+| 13 | BM25 + MedColBERT hybrid via RRF | hybrid | OPTIONAL | Does fusion help? |
+| 14 | MedEmbed-dense + MedEmbed-sparse via RRF | hybrid | OPTIONAL | Cross-paradigm fusion (dense recall + sparse lexical precision) |
 
 ### Implementation notes per baseline
 
@@ -380,6 +386,13 @@ The required baselines, in priority order:
 - **Generic ColBERT:** `lightonai/colbertv2.0` or the default pylate
   ColBERT checkpoint. Build a PLAID index over the same 66k corpus and
   retrieve. No fine-tuning.
+- **MedEmbed-dense / MedEmbed-sparse (in-house):** these are trained
+  variants, not off-the-shelf baselines, but they enter the same baseline
+  table as the dense/sparse paradigm rows. Eval them through the same
+  unified harness — `SentenceTransformer.encode` + dot-product top-k for
+  dense, `SparseEncoder.encode` + sparse top-k for sparse. The in-house
+  variants are what make the table a *cross-paradigm* comparison rather
+  than "ColBERT vs the world."
 - **All baselines must use the same eval corpus and the same dev queries.**
   This is a non-negotiable control.
 
@@ -517,6 +530,20 @@ not specifically responsible — a generic fine-tuning signal would also
 produce uniform gains. The bucket-concentrated gain pattern is what
 supports the mechanism claim.
 
+### Cross-architecture slice table
+
+The slice table is run for **all three architectures** — ColBERT
+(MedEmbed-colbert-base), dense (MedEmbed-dense-base), and sparse
+(MedEmbed-sparse-base) — against the same per-model index. This is the
+spine of the "recipe generalises across paradigms" claim (section 9). The
+desired pattern: the ontology-controlled gain concentrates on the shift
+buckets for **all three** paradigms, not just ColBERT. If the
+bucket-concentrated gain shows only for ColBERT, the framing narrows to
+"ontology-controlled late interaction"; if it holds across paradigms, the
+contribution is a recipe. Each architecture's index is built per Phase T4
+(dense: flat FAISS / numpy dot-product; sparse: inverted sparse top-k;
+ColBERT: existing PLAID index).
+
 ### Mini MedVocabShift benchmark (conditional)
 
 If the existing dev buckets are too small or too noisy to support a
@@ -627,28 +654,64 @@ indexes already exist.
 
 ---
 
-## 9. Additional model variants (optional, deferred)
+## 9. Three retrieval architectures — the cross-paradigm ablation
 
-docs/goals/06 lists five required model variants. The current
-state covers #3 (`medcolbert_ontology_grounded` — DONE) and will cover
-#2 (`bioclinical_colbert_no_ontology` — section 3). The remaining
-variants are optional and should be deferred until after the base
-ablations support the hypothesis.
+The research framing is a **recipe paper across three retrieval paradigms**:
+the same ontology-controlled synthetic supervision, the same backbone
+(BioClinical-ModernBERT), and the same triplet dataset
+(`fierysurf/medcolbert-training-v1`, ~711k rows) applied to three
+architectures — late-interaction ColBERT (DONE / in-progress),
+single-vector dense, and SPLADE sparse. The question the paper answers:
+*does the ontology recipe generalise across retrieval paradigms, or is it a
+ColBERT-specific artifact?*
 
-| Variant | Status | When to do |
-|---|---|---|
-| `generic_colbert` | TODO (baseline table) | Section 3 — no training, just evaluate an off-the-shelf ColBERT |
-| `bioclinical_colbert_no_ontology` | TODO (section 3) | Critical path — do first |
-| `medcolbert_ontology_grounded` | DONE (base) + IN PROGRESS (large) | — |
-| `medcolbert_teacher_filtered` | DEFERRED | Only if the ontology grounding shows a clear win and we want to isolate the LLM-reranker contribution |
-| `medcolbert_dense_negative_refresh` | DEFERRED | Only if the first gate underperforms and v2 data is needed |
-| MRL (dim 32/64/128) | DEFERRED (config has it but pylate does not support it) | Efficiency paper section only; not needed for the core claim |
+All three variants are **core**, not optional. The dense and sparse variants
+are wired through the same config → `resolve_stage` → `build_model` →
+`build_loss` → `build_trainer` surface as ColBERT
+(`src/medcolbert/training/sbert_train.py`,
+`src/medcolbert/training/sparse_train.py`), launched via
+`scripts/training/dense_finetune.py` / `sparse_finetune.py` or
+`medcolbert train dense` / `medcolbert train sparse`. They train on the
+**same** already-built triplet dataset — no new data generation.
+
+| Variant | Architecture | Loss | Status | Config |
+|---|---|---|---|---|
+| MedEmbed-colbert-base | late interaction (ColBERT) | CachedContrastive | DONE | `configs/train_base.yaml` |
+| MedEmbed-colbert-large | late interaction (ColBERT) | CachedContrastive | IN PROGRESS | `configs/train_large.yaml` |
+| MedEmbed-dense-base | single-vector dense | CachedMultipleNegativesRankingLoss | TODO (Phase T) | `configs/train_dense_base.yaml` |
+| MedEmbed-dense-large | single-vector dense | CachedMultipleNegativesRankingLoss | TODO (Phase T) | `configs/train_dense_large.yaml` |
+| MedEmbed-sparse-base | sparse (SPLADE) | SpladeLoss(SparseMNR) | TODO (Phase T) | `configs/train_sparse_base.yaml` |
+| `bioclinical_colbert_no_ontology` | late interaction (ColBERT) | CachedContrastive | TODO (section 3) | — |
+| `medcolbert_teacher_filtered` | late interaction | — | DEFERRED | Only if ontology grounding shows a clear win and we want to isolate the LLM-reranker contribution |
+| `medcolbert_dense_negative_refresh` | — | — | DEFERRED | Only if the first gate underperforms and v2 data is needed |
+| MRL (dim 32/64/128) | — | — | DEFERRED | Config has it but neither pylate nor sentence-transformers wires a matryoshka head here; efficiency paper section only |
+
+### Why dense runs before sparse
+
+MedEmbed-dense is the **only** variant that can compete for the MTEB(Medical)
+aggregate leaderboard — ColBERT cannot (no clustering/reranking capability,
+section 2) and sparse SPLADE is not scored on the dense aggregate. So the
+dense variant is strategic for the Phase M public-benchmark gate and trains
+first, immediately after the large ColBERT run frees the GPU. Sparse is the
+lightest run (no token-level interactions, no GradCache — gradient
+accumulation is allowed) and trains second.
+
+### Why this is the spine of the generalisation claim
+
+The vocab-shift slice analysis (section 6) run across all three
+architectures is what supports "the recipe generalises across paradigms."
+If the ontology-controlled gain concentrates on the shift buckets for dense
+and sparse too — not just ColBERT — the contribution is a recipe, not a
+ColBERT trick. If the gain only shows for ColBERT, the framing narrows to
+"ontology-controlled late interaction." Either is a publishable result; the
+three-architecture table is what tells us which.
 
 Per AGENTS.md: "Large model training is optional and should happen only
-after base model ablations support the hypothesis." The large run is
-already in progress, so the order is inverted; that is a deliberate
-decision by the user, and the large model will be reported as a scaling
-ablation rather than the primary result.
+after base model ablations support the hypothesis." The ColBERT large run is
+already in progress, so the order is inverted; that is a deliberate decision
+by the user, and the large model will be reported as a scaling ablation
+rather than the primary result. The dense/sparse large variants inherit the
+same posture (Phase T3, optional).
 
 ---
 
@@ -827,7 +890,9 @@ completes).
 
 **M4. Run at least one dense baseline on the same tasks** — BGE-large-en-v1.5
 and MedCPT. This is the comparison row that tells us whether the public
-ranking is real.
+ranking is real. After Phase T1, also run **MedEmbed-dense-base** here —
+it is the in-house dense paradigm row and the only variant that can
+compete for the MTEB(Medical) aggregate leaderboard (section 2).
 
 **M5. Pull current leaderboard top-5 per task** from the live MTEB
 leaderboard (or via the `mteb` package results cache). We need to know
@@ -918,6 +983,69 @@ Compare MedColBERT-base vs no-ontology on the real-corpus gate. Decide
 which framing the paper takes (per the table in section 3). Document this
 decision in `docs/ablation_decision.md`.
 
+### Phase T — Dense + sparse architecture variants (after the ColBERT runs
+free the GPU; can overlap with Phase A's CPU/LLM-bound data work)
+
+The same triplet dataset, the same backbone, two new retrieval paradigms
+(section 9). Dense trains first — it is the only variant that can compete
+for the MTEB(Medical) aggregate leaderboard (strategic for the Phase M
+gate). Sparse trains second (lightest run). Both are launched exactly like
+the ColBERT run.
+
+**T1. Train MedEmbed-dense-base**
+
+```bash
+uv run python scripts/training/dense_finetune.py \
+  --train-config configs/train_dense_base.yaml \
+  --model-config configs/base.yaml \
+  --run-name medembed-dense-base-stage2 \
+  2>&1 | tee logs/medembed-dense-base-stage2.log
+# or: medcolbert train dense --run-name medembed-dense-base-stage2
+```
+
+CachedMultipleNegativesRankingLoss = GradCache, so `mini_batch_size`
+forces `gradient_accumulation_steps=1` (mirrors the ColBERT constraint).
+Dense is lighter per-step than ColBERT (no token-level interactions).
+
+**T2. Train MedEmbed-sparse-base**
+
+```bash
+uv run python scripts/training/sparse_finetune.py \
+  --train-config configs/train_sparse_base.yaml \
+  --model-config configs/base.yaml \
+  --run-name medembed-sparse-base-stage2 \
+  2>&1 | tee logs/medembed-sparse-base-stage2.log
+# or: medcolbert train sparse --run-name medembed-sparse-base-stage2
+```
+
+SpladeLoss(SparseMultipleNegativesRankingLoss). No GradCache — gradient
+accumulation is allowed, so the effective batch is
+`per_device_train_batch_size × gradient_accumulation_steps = 64 × 4 = 256`.
+
+**T3. (Optional) Large dense + sparse** — `configs/train_dense_large.yaml`
+/ a future `configs/train_sparse_large.yaml`, after the base variants
+clear the internal real-corpus gate. Mirrors the ColBERT large scaling
+ablation posture (optional, per AGENTS.md).
+
+**T4. Extend the real-corpus eval harness to dense + sparse indexes.**
+`scripts/eval/run_real_corpus.py` is ColBERT/PLAID-specific. Add a
+`SentenceTransformer.encode` + dot-product top-k path (dense) and a
+`SparseEncoder.encode` + sparse top-k path (sparse), reusing
+`aggregate_metrics` from `src/medcolbert/eval/real_corpus.py`. The metric
+functions are already pure and model-agnostic; only the encode-and-retrieve
+step differs.
+
+**T5. Add MedEmbed-dense to the Phase M sweep.** Re-run MTEB Medical
+retrieval subset + R2MED with the dense checkpoint — this is the row that
+can compete for the public aggregate leaderboard (section 2). Sparse is
+not scored on the dense MTEB aggregate; run it on R2MED and the internal
+real-corpus gate instead.
+
+**T6. Decision gate** — does the ontology-controlled gain reproduce for
+dense and sparse on the internal real-corpus gate? If yes, proceed to the
+cross-architecture vocab-shift slice table (Phase D2). If the gain is
+ColBERT-only, narrow the framing per section 9.
+
 ### Phase B — Baselines and unified eval harness
 
 **B1. Build a dense-baseline eval script**
@@ -987,7 +1115,10 @@ Loads dev queries, groups by `vocab_shift_type`, computes per-bucket
 MRR@10 / Recall@10 / Recall@100 against the existing per-model PLAID
 index. Writes `runs/eval/vocab_shift_table.json`.
 
-**D2. Run for MedColBERT-base, no-ontology control, BM25.**
+**D2. Run for MedColBERT-base, MedEmbed-dense-base, MedEmbed-sparse-base,
+no-ontology control, BM25.** The three in-house architectures are the
+cross-paradigm comparison (section 9, section 6 "Cross-architecture slice
+table"); the no-ontology control and BM25 are the mechanism / floor rows.
 
 **D3. Inspect the bucket-level gap.** If MedColBERT's gain concentrates
 in the shift buckets and the same-vocab bucket is competitive, the
@@ -1071,6 +1202,7 @@ open LLM may red-team claims and review the eval tables).
 | **ColBERT cannot top MTEB(Medical, v1) aggregate due to missing clustering/reranking/multilingual tasks** | **Certain** | **Cannot claim #1 on the headline leaderboard** | **Compete on the English-retrieval subset and on R2MED (pure retrieval, all English). Report per-task numbers, not the aggregate. The paper targets per-task SOTA, not the MTEB category-average.** |
 | No-ontology control matches MedColBERT on the real-corpus gate | Medium | Critical — mechanism claim collapses | Run the control (Phase A) after the public benchmark gate. Pivot framing if it happens. |
 | No-ontology control is itself very strong on shift buckets | Low-Medium | Weakens the mechanism claim | The vocab-shift slice analysis is the deciding evidence. If the control is strong on average but weak on `no_direct_lexical_overlap`, the claim still holds at the slice level. |
+| **The ontology gain is ColBERT-only — does not reproduce for dense / sparse** | **Medium** | **Narrows the contribution from "recipe across paradigms" to "ontology-controlled late interaction"** | **Phase T6 is the gate. A ColBERT-only gain is still publishable (workshop / Findings) but drops the cross-paradigm framing. Run dense first since it is also the MTEB-aggregate contender.** |
 | External benchmarks don't show gains vs published baselines | Medium | Limits the "competitive or SOTA" claim | The claim is benchmark-scoped. Even if MedColBERT is not SOTA on TREC-COVID, it can be the strongest late-interaction model on the internal real-corpus gate and the published biomedical tasks. Scope the claims accordingly. |
 | Decontamination finds overlap | Low | Requires re-running evals after excluding contaminated examples | Run decontamination early (Phase E can start once the eval corpus is fixed). |
 | Memorization of UMLS strings in the released model | Low-Medium | Blocks public weight release | Run the memorization audit before release. If found, gate the model or filter. |
@@ -1083,7 +1215,7 @@ open LLM may red-team claims and review the eval tables).
 | **MTEB ColBERT adapter is non-trivial (PLAID retrieval vs dense encode protocol mismatch)** | **Medium** | **Schedule slip for Phase M** | **Check if MTEB ships a ColBERT wrapper first. If not, the adapter is ~50 lines — the ColBERT model already encodes queries/passages; the adapter just routes MTEB's `encode` calls to `pylate.models.ColBERT.encode` with the right `is_query` flag.** |
 | No-ontology dataset generation is slow (LLM at scale) | High | Schedule slip | Start Phase A2 after the Phase M gate. Pilot at 1k first to validate the prompt before committing to 711k. |
 | External benchmark code is fiddly (BEIR split conventions vary) | Medium | Schedule slip | Defer BioASQ and TREC-CT to a second pass if the first three (NFCorpus, SciFact, TRECCOVID) work cleanly. |
-| GPU contention (only one L40S) | High | Sequential training runs | Sequencing is forced: the no-ontology base run (14h) and the no-ontology large run (23h) cannot run while the current large run is on the GPU. Plan serial training windows. Phase M (benchmark eval) also needs GPU but is read-only — can run on the same GPU if training is paused. |
+| GPU contention (only one L40S) | High | Sequential training runs | Sequencing is forced: the no-ontology base run (14h), the no-ontology large run (23h), and the dense/sparse Phase T runs cannot run while the current large run is on the GPU. Dense is lighter than ColBERT (no token interactions); sparse lighter still. Plan serial training windows in this order: large ColBERT (finishing) → dense-base → sparse-base → no-ontology → large variants. Phase M (benchmark eval) is read-only — can run on the same GPU if training is paused. |
 
 ### Gates
 
@@ -1091,6 +1223,7 @@ open LLM may red-team claims and review the eval tables).
 |---|---|---|
 | **Public benchmark gate (M6)** | **MedColBERT-base + at least one dense baseline evaluated on MTEB Medical retrieval subset + R2MED. Decision table from section 2 filled in.** | **Venue decision (SIGIR / ECIR-CIKM / workshop). Determines how much to invest in the rest of the plan.** |
 | No-ontology gate (A6) | No-ontology model evaluated on the real-corpus gate, side-by-side with MedColBERT-base | Mechanism claim, paper framing, vocab-shift analysis |
+| Three-architecture gate (T6) | MedEmbed-dense-base and MedEmbed-sparse-base evaluated on the real-corpus gate, side-by-side with MedColBERT-base | Cross-paradigm generalisation claim (section 9); unblocks the cross-architecture vocab-shift slice table (Phase D2) |
 | Baseline gate (B6) | All required baselines evaluated on the real-corpus gate with the same dev queries | Main benchmark table draft |
 | External benchmark gate (C4) | All enabled benchmarks run for MedColBERT and at least one baseline | "Competitive or SOTA" claim |
 | Vocab-shift gate (D3) | Per-bucket metrics for MedColBERT, no-ontology control, and BM25 | Mechanism claim, headline paper result |
@@ -1187,6 +1320,17 @@ runs/
     eval_epoch{1,2,4,5}.json
     eval_final.json
     eval_comparison.txt
+  dense_base_stage2/                 # Phase T1 — MedEmbed-dense-base
+    checkpoint-*/
+    final/
+    eval_final.json                  # dense real-corpus gate (Phase T4)
+  dense_large_stage2/                # Phase T3 (optional) — MedEmbed-dense-large
+    final/
+    eval_final.json
+  sparse_base_stage2/                # Phase T2 — MedEmbed-sparse-base
+    checkpoint-*/
+    final/
+    eval_final.json                  # sparse real-corpus gate (Phase T4)
   no_ontology_stage2/                # Phase A
     checkpoint-*/
     final/
@@ -1208,6 +1352,9 @@ runs/
       R2MEDPMCClinicalRetrieval.json
       R2MEDIIYiClinicalRetrieval.json
     mteb_large/                      # Phase M3 — same tasks for MedColBERT-large
+    mteb_dense_base/                 # Phase M4/T5 — MedEmbed-dense-base (MTEB aggregate contender)
+    mteb_dense_large/                # Phase T3/T5 — MedEmbed-dense-large
+    mteb_sparse_base/                # Phase T5 — MedEmbed-sparse-base (R2MED only; not on dense aggregate)
     mteb_bge_large/                  # Phase M4 — dense baseline
     mteb_medcpt/                      # Phase M4 — biomedical dense baseline
     leaderboard_targets.json         # Phase M5 — current top-5 per task
@@ -1224,6 +1371,9 @@ runs/
     medcpt.json                      # Phase B4
     bmr_retriever.json               # Phase B4
     generic_colbert.json             # Phase B5
+    medembed_dense_base.json         # Phase T1/T4 — in-house dense paradigm
+    medembed_dense_large.json        # Phase T3/T4
+    medembed_sparse_base.json        # Phase T2/T4 — in-house sparse paradigm
     nfcorpus_medcolbert_base.json    # Phase C
     nfcorpus_medcolbert_large.json   # Phase C
     nfcorpus_no_ontology.json        # Phase C
@@ -1245,7 +1395,7 @@ runs/
 
 ## Summary
 
-The path from here to paper has **two critical gates**, not one:
+The path from here to paper has **three critical gates**, not one:
 
 1. **The public benchmark gate (Phase M).** Run MTEB Medical retrieval
    subset + R2MED on MedColBERT-base *first*, before any new training or
@@ -1264,29 +1414,46 @@ The path from here to paper has **two critical gates**, not one:
    runs *after* Phase M because its framing (and how much to invest in
    it) depends on the public benchmark result.
 
+3. **The three-architecture generalisation gate (Phase T).** Train dense
+   and sparse variants on the *same* triplet dataset and compare on the
+   internal gate. This isolates whether the ontology recipe generalises
+   across retrieval paradigms or is a ColBERT-specific artifact. Without
+   it, the paper is "ontology-controlled ColBERT," not "a recipe across
+   paradigms." It runs after the ColBERT runs free the GPU; dense first
+   (it also backs the Phase M MTEB-aggregate row).
+
 ### Revised ordering
 
 1. **Phase M — Public retrieval benchmarks** (FIRST). MTEB Medical
    retrieval subset, R2MED, with BGE-large + MedCPT as comparison rows.
-   Venue-deciding.
+   Venue-deciding. After Phase T1, add MedEmbed-dense-base here — the
+   one variant that can top the MTEB(Medical) aggregate.
 2. **Phase A — No-ontology control** (after Phase M gate). Data
    generation is CPU/LLM-bound and can overlap with GPU-bound work.
-3. **Phase B — Unified eval harness + required baselines** on the
-   internal gate.
-4. **Phase C — Remaining external benchmarks** (TREC-CT, PMC-Patients,
+3. **Phase T — Dense + sparse architecture variants** (after the ColBERT
+   runs free the GPU). Same data, same backbone, two new paradigms;
+   dense first (MTEB-aggregate contender), sparse second. The
+   cross-paradigm generalisation claim (section 9) lives or dies on T6.
+4. **Phase B — Unified eval harness + required baselines** on the
+   internal gate (the in-house dense/sparse variants enter the same
+   table as the dense/sparse paradigm rows).
+5. **Phase C — Remaining external benchmarks** (TREC-CT, PMC-Patients,
    BioASQ) for the "second domain" generalization claim.
-5. **Phase D — Vocab-shift slices** — the spine of the mechanism story.
-6. **Phase E — Decontamination**, **Phase F — Efficiency** — mechanical.
-7. **Phase G — Release audit + model card + memorization audit.**
-8. **Phase H — Paper writing**, only after all evidence exists.
+6. **Phase D — Vocab-shift slices** — the spine of the mechanism story,
+   run across **all three architectures** (ColBERT, dense, sparse).
+7. **Phase E — Decontamination**, **Phase F — Efficiency** — mechanical.
+8. **Phase G — Release audit + model card + memorization audit.**
+9. **Phase H — Paper writing**, only after all evidence exists.
 
 The plan deliberately front-loads the **venue** risk (Phase M) before
-the **mechanism** risk (Phase A), because the venue determines whether
-the mechanism story is worth telling at a top venue or just a workshop.
-Phase M can run as soon as the large training completes (or even on the
-base model now, if GPU time is available). Phase A's data generation is
-the slowest non-GPU task and should start immediately after the Phase M
-gate so it can overlap with the remaining GPU-bound eval work.
+the **mechanism** risk (Phase A) and the **generalisation** risk (Phase T),
+because the venue determines whether the cross-paradigm story is worth
+telling at a top venue or just a workshop. Phase M can run as soon as the
+large training completes (or even on the base model now, if GPU time is
+available). Phase A's data generation is the slowest non-GPU task and
+should start immediately after the Phase M gate so it can overlap with the
+remaining GPU-bound eval work; Phase T's GPU runs queue serially behind the
+ColBERT large run.
 
 Each task above is small enough to fit in a single working session, and
 the ordering respects the dependency chain so that no task is started
