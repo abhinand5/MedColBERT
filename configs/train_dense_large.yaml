@@ -1,0 +1,27 @@
+# Dense (single-vector) MedEmbed-large training defaults.
+# Derived from configs/train_large.yaml minus the ColBERT-specific fields.
+# Scales the base dense config for the 396M backbone.
+
+model_config: configs/large.yaml
+framework: sentence_transformers
+
+stage2_dense:
+  enabled: true
+  max_steps: 14000           # ~5 epochs over 711k rows
+  learning_rate: 5.0e-6      # half of base; larger model, more conservative
+  warmup_ratio: 0.03
+  per_device_train_batch_size: 256
+  mini_batch_size: 96         # GradCache chunk; tuned for 48GB L40S without GC
+  gradient_accumulation_steps: 1     # forced by cached loss
+  bf16: true
+  gradient_checkpointing: false
+  loss_type: cached_mnrl
+  pooling: mean
+  save_strategy: epoch
+  save_total_limit: 6
+
+outputs:
+  checkpoint_dir: runs/dense_large_stage2
+  run_dir: runs/dense_large_stage2
+  save_steps: 10000
+  eval_steps: 5000

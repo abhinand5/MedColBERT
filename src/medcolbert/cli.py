@@ -336,6 +336,131 @@ def _smoke_test_models(ok: list[str], warnings: list[str], errors: list[str]) ->
         warnings.append("PyLate not importable (training extras may be incomplete)")
 
 
+# ── Training commands ─────────────────────────────────────────────────────────
+
+
+@train_app.command("dense")
+def train_dense(
+    train_config: str = typer.Option(
+        "configs/train_dense_base.yaml", "--train-config", "-c",
+        help="Path to dense training config YAML."
+    ),
+    model_config: str = typer.Option(
+        "configs/base.yaml", "--model-config",
+        help="Path to model (backbone) config YAML."
+    ),
+    stage: str = typer.Option("stage2_dense", "--stage"),
+    config_name: str = typer.Option("long", "--config-name",
+                                    help="HF dataset config (long=one negative per row)."),
+    split: str = typer.Option("train", "--split"),
+    max_examples: Optional[int] = typer.Option(None, "--max-examples",
+        help="Cap training rows (default: full dataset)."),
+    max_steps: Optional[int] = typer.Option(None, "--max-steps"),
+    batch_size: Optional[int] = typer.Option(None, "--batch-size",
+        help="Override per_device_train_batch_size (effective batch)."),
+    mini_batch_size: Optional[int] = typer.Option(None, "--mini-batch-size",
+        help="Override GradCache mini_batch_size (forces grad_accum=1)."),
+    learning_rate: Optional[float] = typer.Option(None, "--learning-rate"),
+    no_gradient_checkpointing: bool = typer.Option(
+        False, "--no-gradient-checkpointing",
+        help="Disable gradient checkpointing (faster, more VRAM)."),
+    save_strategy: Optional[str] = typer.Option(
+        None, "--save-strategy",
+        help="Checkpoint save strategy: 'steps' or 'epoch'."),
+    save_total_limit: Optional[int] = typer.Option(None, "--save-total-limit"),
+    exclude_weak: bool = typer.Option(False, "--exclude-weak",
+        help="Drop negatives flagged weak by the audit."),
+    min_relevant_looks: Optional[int] = typer.Option(None, "--min-relevant-looks"),
+    eval_holdout: int = typer.Option(500, "--eval-holdout"),
+    output_dir: Optional[str] = typer.Option(
+        None, "--output-dir",
+        help="Output directory. Default: config's outputs.run_dir."),
+    run_name: str = typer.Option("medembed-dense-base-stage2", "--run-name"),
+    save_final: bool = typer.Option(True, "--save-final/--no-save-final"),
+    seed: int = typer.Option(42, "--seed"),
+) -> None:
+    """Train a dense (single-vector) MedEmbed model on the v1 triplets."""
+    import types
+
+    from medcolbert.training.sbert_train import run_finetune
+
+    args = types.SimpleNamespace(
+        train_config=train_config, model_config=model_config, stage=stage,
+        config_name=config_name, split=split, max_examples=max_examples,
+        max_steps=max_steps, batch_size=batch_size, mini_batch_size=mini_batch_size,
+        learning_rate=learning_rate, no_gradient_checkpointing=no_gradient_checkpointing,
+        save_strategy=save_strategy, save_total_limit=save_total_limit,
+        exclude_weak=exclude_weak, min_relevant_looks=min_relevant_looks,
+        eval_holdout=eval_holdout, output_dir=output_dir, run_name=run_name,
+        save_final=save_final, seed=seed,
+    )
+    run_finetune(args)
+
+
+@train_app.command("sparse")
+def train_sparse(
+    train_config: str = typer.Option(
+        "configs/train_sparse_base.yaml", "--train-config", "-c",
+        help="Path to sparse training config YAML."
+    ),
+    model_config: str = typer.Option(
+        "configs/base.yaml", "--model-config",
+        help="Path to model (backbone) config YAML."
+    ),
+    stage: str = typer.Option("stage2_sparse", "--stage"),
+    config_name: str = typer.Option("long", "--config-name",
+                                    help="HF dataset config (long=one negative per row)."),
+    split: str = typer.Option("train", "--split"),
+    max_examples: Optional[int] = typer.Option(None, "--max-examples",
+        help="Cap training rows (default: full dataset)."),
+    max_steps: Optional[int] = typer.Option(None, "--max-steps"),
+    batch_size: Optional[int] = typer.Option(None, "--batch-size",
+        help="Override per_device_train_batch_size."),
+    learning_rate: Optional[float] = typer.Option(None, "--learning-rate"),
+    query_regularizer_weight: Optional[float] = typer.Option(
+        None, "--query-regularizer-weight",
+        help="Override SpladeLoss query_regularizer_weight."),
+    document_regularizer_weight: Optional[float] = typer.Option(
+        None, "--document-regularizer-weight",
+        help="Override SpladeLoss document_regularizer_weight."),
+    no_gradient_checkpointing: bool = typer.Option(
+        False, "--no-gradient-checkpointing",
+        help="Disable gradient checkpointing."),
+    save_strategy: Optional[str] = typer.Option(
+        None, "--save-strategy",
+        help="Checkpoint save strategy: 'steps' or 'epoch'."),
+    save_total_limit: Optional[int] = typer.Option(None, "--save-total-limit"),
+    exclude_weak: bool = typer.Option(False, "--exclude-weak",
+        help="Drop negatives flagged weak by the audit."),
+    min_relevant_looks: Optional[int] = typer.Option(None, "--min-relevant-looks"),
+    eval_holdout: int = typer.Option(500, "--eval-holdout"),
+    output_dir: Optional[str] = typer.Option(
+        None, "--output-dir",
+        help="Output directory. Default: config's outputs.run_dir."),
+    run_name: str = typer.Option("medembed-sparse-base-stage2", "--run-name"),
+    save_final: bool = typer.Option(True, "--save-final/--no-save-final"),
+    seed: int = typer.Option(42, "--seed"),
+) -> None:
+    """Train a sparse (SPLADE) MedEmbed model on the v1 triplets."""
+    import types
+
+    from medcolbert.training.sparse_train import run_finetune
+
+    args = types.SimpleNamespace(
+        train_config=train_config, model_config=model_config, stage=stage,
+        config_name=config_name, split=split, max_examples=max_examples,
+        max_steps=max_steps, batch_size=batch_size, learning_rate=learning_rate,
+        query_regularizer_weight=query_regularizer_weight,
+        document_regularizer_weight=document_regularizer_weight,
+        no_gradient_checkpointing=no_gradient_checkpointing,
+        save_strategy=save_strategy, save_total_limit=save_total_limit,
+        exclude_weak=exclude_weak, min_relevant_looks=min_relevant_looks,
+        eval_holdout=eval_holdout, output_dir=output_dir, run_name=run_name,
+        save_final=save_final, seed=seed,
+    )
+    run_finetune(args)
+
+
 # ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 

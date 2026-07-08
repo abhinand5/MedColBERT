@@ -1,0 +1,43 @@
+# Dense (single-vector) MedEmbed training defaults.
+# Derived from configs/train_base.yaml minus the ColBERT-specific fields.
+# Same triplet dataset (fierysurf/medcolbert-training-v1, ~711k rows).
+# CachedMultipleNegativesRankingLoss mirrors the ColBERT GradCache constraint
+# (incompatible with gradient accumulation -> mini_batch_size forces grad_accum=1).
+
+model_config: configs/base.yaml
+framework: sentence_transformers
+
+stage0_smoke:
+  enabled: true
+  max_steps: 50
+  learning_rate: 1.0e-5
+  per_device_train_batch_size: 8
+  mini_batch_size: 4
+  gradient_accumulation_steps: 1     # forced by cached_mnrl anyway
+  bf16: true
+  gradient_checkpointing: false
+  loss_type: cached_mnrl
+  pooling: mean
+  save_strategy: steps
+  save_total_limit: 1
+
+stage2_dense:
+  enabled: true
+  max_steps: 14000           # ~5 epochs over 711k rows at effective batch 256
+  learning_rate: 1.0e-5       # parity with the ColBERT base run
+  warmup_ratio: 0.03
+  per_device_train_batch_size: 256   # logical in-batch negatives
+  mini_batch_size: 160        # GradCache chunk; cached_mnrl forces grad_accum=1
+  gradient_accumulation_steps: 1     # forced by cached loss
+  bf16: true
+  gradient_checkpointing: false     # dense is lighter than ColBERT; fits 48GB L40S
+  loss_type: cached_mnrl
+  pooling: mean               # ModernBERT has no native pooler; mean is the default
+  save_strategy: epoch
+  save_total_limit: 3
+
+outputs:
+  checkpoint_dir: runs/dense_base_stage2
+  run_dir: runs/dense_base_stage2
+  save_steps: 10000
+  eval_steps: 5000

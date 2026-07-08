@@ -28,6 +28,14 @@ PYLATE_QUERY_COL = "query"
 PYLATE_POSITIVE_COL = "positive"
 PYLATE_NEGATIVE_COL = "negative"
 
+# sentence-transformers losses (MultipleNegativesRankingLoss and the sparse
+# variants) consume ``anchor`` / ``positive`` (+ optional ``negative``). The
+# triplet dataset ships ``query`` / ``positive`` / ``negative``; only the
+# query column is renamed.
+SBERT_QUERY_COL = "anchor"
+SBERT_POSITIVE_COL = "positive"
+SBERT_NEGATIVE_COL = "negative"
+
 # Source column names on the HF ``long`` config.
 SOURCE_QUERY_COL = "query"
 SOURCE_POSITIVE_COL = "positive_passage"
@@ -127,6 +135,22 @@ def to_pylate_columns(
     if not keep_audit:
         keep = [PYLATE_QUERY_COL, PYLATE_POSITIVE_COL, PYLATE_NEGATIVE_COL]
         ds = ds.select_columns([c for c in keep if c in ds.column_names])
+    return ds
+
+
+def to_sbert_columns(ds: Dataset) -> Dataset:
+    """Rename the triplet ``query`` column to ``anchor`` for sentence-transformers.
+
+    sentence-transformers ``MultipleNegativesRankingLoss`` (and the sparse
+    ``SparseMultipleNegativesRankingLoss``) consume ``anchor`` / ``positive``
+    with an optional ``negative`` hard-negative column. Call this after
+    :func:`to_pylate_columns` / :func:`prepare_training_dataset`, which leaves
+    the dataset in the ``query`` / ``positive`` / ``negative`` shape; only the
+    ``query`` → ``anchor`` rename is applied.
+    """
+    rename_map = {PYLATE_QUERY_COL: SBERT_QUERY_COL} if PYLATE_QUERY_COL in ds.column_names else {}
+    if rename_map:
+        ds = ds.rename_columns(rename_map)
     return ds
 
 

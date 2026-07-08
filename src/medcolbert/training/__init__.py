@@ -1,4 +1,11 @@
-"""Training pipeline: data loading, loss, and trainer construction for PyLate."""
+"""Training pipeline: data loading, loss, and trainer construction.
+
+Three retrieval architectures share the same triplet dataset and the same
+HF-style trainer surface: ``sbert_train`` (dense single-vector),
+``sparse_train`` (SPLADE sparse), and ``pylate_train`` (ColBERT late
+interaction). Each module assembles its model/loss/trainer from config dicts
+so launch scripts stay thin.
+"""
 
 from medcolbert.training.datasets import (
     AUDIT_COLUMNS,
@@ -9,6 +16,7 @@ from medcolbert.training.datasets import (
     prepare_training_dataset,
     subset_dataset,
     to_pylate_columns,
+    to_sbert_columns,
 )
 
 __all__ = [
@@ -20,4 +28,5 @@ __all__ = [
     "prepare_training_dataset",
     "subset_dataset",
     "to_pylate_columns",
+    "to_sbert_columns",
 ]

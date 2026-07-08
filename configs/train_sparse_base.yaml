@@ -1,0 +1,46 @@
+# Sparse (SPLADE) MedEmbed training defaults.
+# Same triplet dataset (fierysurf/medcolbert-training-v1, ~711k rows).
+# SpladeLoss wraps SparseMultipleNegativesRankingLoss with the FLOPS
+# regularizer (the canonical sparse training recipe). NO GradCache — sparse
+# in-batch negatives are compatible with gradient accumulation, and the
+# NO_DUPLICATES batch sampler avoids duplicate anchors within a batch.
+
+model_config: configs/base.yaml
+framework: sentence_transformers
+
+stage0_smoke:
+  enabled: true
+  max_steps: 50
+  learning_rate: 2.0e-5
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 1
+  bf16: true
+  gradient_checkpointing: false
+  loss_type: splade_mnr
+  query_regularizer_weight: 5.0e-5
+  document_regularizer_weight: 3.0e-5
+  batch_sampler: no_duplicates
+  save_strategy: steps
+  save_total_limit: 1
+
+stage2_sparse:
+  enabled: true
+  max_steps: 14000           # ~5 epochs over 711k rows at effective batch 256
+  learning_rate: 2.0e-5       # typical SPLADE fine-tune LR
+  warmup_ratio: 0.1
+  per_device_train_batch_size: 64
+  gradient_accumulation_steps: 4   # effective batch 256; allowed for sparse MNR
+  bf16: true
+  gradient_checkpointing: false
+  loss_type: splade_mnr
+  query_regularizer_weight: 5.0e-5
+  document_regularizer_weight: 3.0e-5
+  batch_sampler: no_duplicates
+  save_strategy: epoch
+  save_total_limit: 3
+
+outputs:
+  checkpoint_dir: runs/sparse_base_stage2
+  run_dir: runs/sparse_base_stage2
+  save_steps: 10000
+  eval_steps: 5000
