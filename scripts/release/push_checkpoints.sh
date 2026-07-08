@@ -1,77 +1,138 @@
 #!/usr/bin/env bash
-# push_checkpoints.sh — Push all MedColBERT-v1-alpha checkpoints to a private
-# Hugging Face model repo for internal provenance.
+# push_checkpoints.sh — Push checkpoint directories to a Hugging Face model repo.
 #
-# Repo layout after upload:
-#   /                                ← final (canonical v1-alpha weights)
-#   /checkpoints/checkpoint-2776/    ← epoch 1 (full state incl. optimizer)
-#   /checkpoints/checkpoint-5552/    ← epoch 2
-#   /checkpoints/checkpoint-11104/   ← epoch 4
-#   /checkpoints/checkpoint-13880/   ← epoch 5
-#   /checkpoints/checkpoint-14000/   ← epoch 5 (final step, with optimizer)
-#
-# Each checkpoint folder includes optimizer.pt + scheduler.pt + rng_state.pth
-# (~1.2 GB extra) so training can resume from any boundary. Total ~10 GB.
+# Scans a local run directory for checkpoint-* subfolders and a final/ subfolder,
+# then uploads them to the given HF repo.
 #
 # Usage:
-#   bash scripts/release/push_checkpoints.sh
+#   bash scripts/release/push_checkpoints.sh --local-dir <PATH> --repo-id <REPO> [--prefix <PREFIX>]
+#
+# Examples:
+#   # Push base model to the internal repo (final → repo root)
+#   bash scripts/release/push_checkpoints.sh \
+#     --local-dir runs/base_stage2 \
+#     --repo-id fierysurf/MedColBERT-v1-alpha-internal
+#
+#   # Push large model under a subfolder
+#   bash scripts/release/push_checkpoints.sh \
+#     --local-dir runs/large_stage2 \
+#     --repo-id fierysurf/MedColBERT-v1-alpha-internal \
+#     --prefix large/
+#
+#   # Dry-run to see what would be uploaded
+#   bash scripts/release/push_checkpoints.sh \
+#     --local-dir runs/large_stage2 \
+#     --repo-id fierysurf/MedColBERT-v1-alpha-internal \
+#     --prefix large/ \
+#     --dry-run
 #
 # Env:
 #   HF_TOKEN   — required (Hugging Face token with write access)
-#   REPO_ID    — destination repo (default fierysurf/MedColBERT-v1-alpha-internal)
-#   DRY_RUN    — set to 1 to skip actual uploads (preflight only)
+#
+# Flags:
+#   --local-dir <PATH>   Path to the run directory containing checkpoints
+#   --repo-id <REPO>     Destination Hugging Face repo
+#   --prefix <PREFIX>    Subfolder prefix in the repo (e.g. "large/")
+#   --dry-run            Preflight only, skip actual uploads
+#
+# The "Load model" hint is auto-detected from modules.json: ColBERT (pylate),
+# dense (SentenceTransformer), or sparse (SparseEncoder).
 
 set -euo pipefail
-
-REPO_ID="${REPO_ID:-fierysurf/MedColBERT-v1-alpha-internal}"
-DRY_RUN="${DRY_RUN:-0}"
-
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$REPO_ROOT"
 
 ts() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(ts)] $*"; }
 
-# ─── Pre-flight ───────────────────────────────────────────────────────────────
-log "PRE-FLIGHT"
+# ─── Parse args ─────────────────────────────────────────────────────────────
+LOCAL_DIR=""
+REPO_ID=""
+PREFIX=""
+DRY_RUN=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --local-dir) LOCAL_DIR="$2"; shift 2 ;;
+    --repo-id)   REPO_ID="$2";   shift 2 ;;
+    --prefix)    PREFIX="$2";    shift 2 ;;
+    --dry-run)   DRY_RUN=1;      shift   ;;
+    *)
+      log "ERROR: unknown argument: $1"
+      log "Usage: $0 --local-dir <PATH> --repo-id <REPO> [--prefix <PREFIX>] [--dry-run]"
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z "$LOCAL_DIR" ]; then
+  log "ERROR: --local-dir is required"
+  exit 1
+fi
+
+if [ -z "$REPO_ID" ]; then
+  log "ERROR: --repo-id is required"
+  exit 1
+fi
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$REPO_ROOT"
+
+# Normalise LOCAL_DIR to absolute
+LOCAL_DIR="$(cd "$LOCAL_DIR" 2>/dev/null && pwd)" || {
+  log "ERROR: --local-dir '$LOCAL_DIR' does not exist or is not accessible"
+  exit 1
+}
+
+log "local-dir: $LOCAL_DIR"
+log "repo-id:   $REPO_ID"
+log "prefix:    '${PREFIX:-}(none)'"
+log "dry-run:   $([ "$DRY_RUN" -eq 1 ] && echo yes || echo no)"
+
+# ─── Auth ────────────────────────────────────────────────────────────────────
+log "AUTH CHECK"
 
 if [ -z "${HF_TOKEN:-}" ]; then
   log "ERROR: HF_TOKEN env var required"
   exit 1
 fi
 
-if ! hf auth whoami --format quiet 2>&1 | grep -q "fierysurf"; then
-  log "ERROR: not logged in as fierysurf. Run: hf auth login"
+HF_USER="$(hf auth whoami --format quiet 2>&1)"
+if [ -z "$HF_USER" ]; then
+  log "ERROR: not logged in. Run: hf auth login"
   exit 1
 fi
-log "  logged in: $(hf auth whoami --format quiet 2>&1)"
+log "  logged in: $HF_USER"
 
-declare -a SOURCES=(
-  "checkpoint-2776|/workspace/models/checkpoint-2776|epoch 1"
-  "checkpoint-5552|/workspace/models/checkpoint-5552|epoch 2"
-  "checkpoint-11104|runs/base_stage2/checkpoint-11104|epoch 4"
-  "checkpoint-13880|runs/base_stage2/checkpoint-13880|epoch 5"
-  "checkpoint-14000|runs/base_stage2/checkpoint-14000|epoch 5 (final step)"
-  "final|runs/base_stage2/final|canonical v1-alpha"
-)
+# ─── Discover checkpoints ────────────────────────────────────────────────────
+log "SCAN: $LOCAL_DIR"
 
-MISSING=0
-for entry in "${SOURCES[@]}"; do
-  IFS='|' read -r name path label <<< "$entry"
-  if [ ! -f "$path/config.json" ]; then
-    log "  MISSING: $name at $path"
-    MISSING=$((MISSING + 1))
-  else
-    sz=$(du -sh "$path" | cut -f1)
-    log "  OK: $name ($sz, $label) ← $path"
+declare -a CHECKPOINTS=()
+FINAL_DIR=""
+
+for item in "$LOCAL_DIR"/*/; do
+  name="$(basename "$item")"
+  if [[ "$name" == checkpoint-* ]]; then
+    if [ -f "$item/config.json" ]; then
+      sz=$(du -sh "$item" | cut -f1)
+      log "  checkpoint: $name ($sz)"
+      CHECKPOINTS+=("$name|$item")
+    else
+      log "  SKIP: $name (no config.json)"
+    fi
+  elif [ "$name" = "final" ]; then
+    if [ -f "$item/config.json" ]; then
+      sz=$(du -sh "$item" | cut -f1)
+      log "  final: $item ($sz)"
+      FINAL_DIR="$item"
+    else
+      log "  SKIP: final (no config.json)"
+    fi
   fi
 done
 
-if [ "$MISSING" -gt 0 ]; then
-  log "ERROR: $MISSING source checkpoint(s) missing"
+if [ -z "$FINAL_DIR" ] && [ ${#CHECKPOINTS[@]} -eq 0 ]; then
+  log "ERROR: no checkpoints or final/ found in $LOCAL_DIR"
   exit 1
 fi
-log "  all ${#SOURCES[@]} sources present"
 
 # ─── Create private repo ─────────────────────────────────────────────────────
 log "Creating private repo (if missing): $REPO_ID"
@@ -80,50 +141,121 @@ if [ "$DRY_RUN" -eq "0" ]; then
     log "  (repo may already exist; continuing)"
 fi
 
-# ─── Upload final to repo root (canonical weights) ──────────────────────────
-log "UPLOAD: final → $REPO_ID:/ (canonical v1-alpha)"
-if [ "$DRY_RUN" -eq "0" ]; then
-  hf upload "$REPO_ID" "runs/base_stage2/final" "." \
-    --type model \
-    --commit-message "Upload MedColBERT-v1-alpha (final, canonical weights)" \
-    --commit-description "BioClinical-ModernBERT + ColBERT, 5 epochs CachedContrastive on 711k ontology-controlled triplets. Recall@100=0.971 vs BM25 0.626 on PubMed 66k corpus." \
-    2>&1 | sed 's/^/  /'
-else
-  log "  [dry-run] would upload runs/base_stage2/final to repo root"
+# ─── Upload final → <prefix> (canonical weights) ─────────────────────────────
+if [ -n "$FINAL_DIR" ]; then
+  # If prefix is empty, we upload final to repo root (.)
+  # If prefix is set, we upload final to that subfolder
+  hf_dst="${PREFIX:-.}"
+  log "UPLOAD: final → $REPO_ID:/$hf_dst"
+  if [ "$DRY_RUN" -eq "0" ]; then
+    hf upload "$REPO_ID" "$FINAL_DIR" "$hf_dst" \
+      --type model \
+      --commit-message "Upload final (canonical weights)" \
+      2>&1 | sed 's/^/  /'
+  else
+    log "  [dry-run] would upload $FINAL_DIR → $hf_dst"
+  fi
 fi
 
-# ─── Upload each checkpoint folder to /checkpoints/<name>/ ────────────────────
-for entry in "${SOURCES[@]}"; do
-  IFS='|' read -r name path label <<< "$entry"
-  [ "$name" = "final" ] && continue
-  dst="checkpoints/$name/"
-  log "UPLOAD: $name ($label) → $REPO_ID:/$dst"
+# ─── Upload each checkpoint to <prefix>checkpoints/<name>/ ───────────────────
+for entry in "${CHECKPOINTS[@]}"; do
+  IFS='|' read -r name path <<< "$entry"
+  dst="${PREFIX}checkpoints/$name/"
+  log "UPLOAD: $name → $REPO_ID:/$dst"
   if [ "$DRY_RUN" -eq "0" ]; then
     hf upload "$REPO_ID" "$path" "$dst" \
       --type model \
-      --commit-message "Upload checkpoint: $name ($label)" \
+      --commit-message "Upload checkpoint: $name" \
       2>&1 | sed 's/^/  /'
   else
-    log "  [dry-run] would upload $path to $dst"
+    log "  [dry-run] would upload $path → $dst"
   fi
 done
+
+# ─── Detect architecture (for the load hint) ─────────────────────────────────
+# modules.json is the SentenceTransformer/PyLate manifest; the module types
+# distinguish the three paradigms:
+#   SpladePooling / sparse_encoder        -> SparseEncoder
+#   pylate.models.*                       -> pylate ColBERT
+#   sentence_transformers.models.Pooling  -> SentenceTransformer (dense)
+# Order matters: SpladePooling contains "Pooling", so check sparse first.
+ARCH="colbert"
+SAMPLE_DIR=""
+if [ -n "$FINAL_DIR" ]; then
+  SAMPLE_DIR="$FINAL_DIR"
+elif [ ${#CHECKPOINTS[@]} -gt 0 ]; then
+  SAMPLE_DIR="${CHECKPOINTS[0]#*|}"
+fi
+if [ -n "$SAMPLE_DIR" ] && [ -f "${SAMPLE_DIR%/}/modules.json" ]; then
+  if grep -qE "SpladePooling|sparse_encoder" "${SAMPLE_DIR%/}/modules.json"; then
+    ARCH="sparse"
+  elif grep -q "pylate" "${SAMPLE_DIR%/}/modules.json"; then
+    ARCH="colbert"
+  elif grep -q "Pooling" "${SAMPLE_DIR%/}/modules.json"; then
+    ARCH="dense"
+  fi
+fi
+log "architecture: $ARCH"
 
 # ─── Done ────────────────────────────────────────────────────────────────────
 log ""
 log "DONE. Repo: https://huggingface.co/$REPO_ID"
-log "Layout:"
-log "  /                                ← final (canonical v1-alpha)"
-log "  /checkpoints/checkpoint-2776/    ← epoch 1"
-log "  /checkpoints/checkpoint-5552/    ← epoch 2"
-log "  /checkpoints/checkpoint-11104/   ← epoch 4"
-log "  /checkpoints/checkpoint-13880/   ← epoch 5"
-log "  /checkpoints/checkpoint-14000/   ← epoch 5 (final step, with optimizer)"
 log ""
-log "Load canonical model:"
-log "  from pylate import models"
-log "  model = models.ColBERT('$REPO_ID')"
-log ""
-log "Load a specific checkpoint:"
-log "  from huggingface_hub import snapshot_download"
-log "  path = snapshot_download('$REPO_ID', allow_patterns='checkpoints/checkpoint-2776/*')"
-log "  model = models.ColBERT(path + '/checkpoints/checkpoint-2776')"
+log "Load model ($ARCH):"
+case "$ARCH" in
+  colbert)
+    if [ -n "$PREFIX" ]; then
+      log "  from pylate import models"
+      log "  model = models.ColBERT('$REPO_ID', subfolder='${PREFIX%/}')"
+    else
+      log "  from pylate import models"
+      log "  model = models.ColBERT('$REPO_ID')"
+    fi
+    ;;
+  sparse)
+    if [ -n "$PREFIX" ]; then
+      log "  from huggingface_hub import snapshot_download"
+      log "  from sentence_transformers import SparseEncoder"
+      log "  p = snapshot_download('$REPO_ID', allow_patterns='${PREFIX}*')"
+      log "  model = SparseEncoder(p + '/${PREFIX%/}')"
+    else
+      log "  from sentence_transformers import SparseEncoder"
+      log "  model = SparseEncoder('$REPO_ID')"
+    fi
+    ;;
+  dense)
+    if [ -n "$PREFIX" ]; then
+      log "  from huggingface_hub import snapshot_download"
+      log "  from sentence_transformers import SentenceTransformer"
+      log "  p = snapshot_download('$REPO_ID', allow_patterns='${PREFIX}*')"
+      log "  model = SentenceTransformer(p + '/${PREFIX%/}')"
+    else
+      log "  from sentence_transformers import SentenceTransformer"
+      log "  model = SentenceTransformer('$REPO_ID')"
+    fi
+    ;;
+esac
+
+if [ ${#CHECKPOINTS[@]} -gt 0 ]; then
+  first_ckpt="${CHECKPOINTS[0]%%|*}"
+  log ""
+  log "Load a specific checkpoint:"
+  log "  from huggingface_hub import snapshot_download"
+  case "$ARCH" in
+    colbert)
+      log "  from pylate import models"
+      log "  p = snapshot_download('$REPO_ID', allow_patterns='${PREFIX}checkpoints/${first_ckpt}/*')"
+      log "  model = models.ColBERT(p + '/${PREFIX}checkpoints/${first_ckpt}')"
+      ;;
+    sparse)
+      log "  from sentence_transformers import SparseEncoder"
+      log "  p = snapshot_download('$REPO_ID', allow_patterns='${PREFIX}checkpoints/${first_ckpt}/*')"
+      log "  model = SparseEncoder(p + '/${PREFIX}checkpoints/${first_ckpt}')"
+      ;;
+    dense)
+      log "  from sentence_transformers import SentenceTransformer"
+      log "  p = snapshot_download('$REPO_ID', allow_patterns='${PREFIX}checkpoints/${first_ckpt}/*')"
+      log "  model = SentenceTransformer(p + '/${PREFIX}checkpoints/${first_ckpt}')"
+      ;;
+  esac
+fi
