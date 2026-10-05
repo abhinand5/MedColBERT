@@ -1,14 +1,24 @@
 """Real-corpus retrieval eval CLI — the train-on-synthetic quality gate.
 
-Builds a ColBERT PLAID index over the 66k real PubMed corpus, retrieves the
-5,967 dev queries, and reports MRR@10, Recall@10/100, nDCG@10. The trained
-model MUST beat the BM25 baseline (Recall@100 ≈ 0.63).
+Builds an index over the 66k real PubMed corpus, retrieves the 5,967 dev
+queries, and reports MRR@10, Recall@10/100, nDCG@10. The trained model MUST
+beat the BM25 baseline (Recall@100 ≈ 0.63).
+
+Two backends via --arch:
+  * colbert (default): PyLate PLAID index + late-interaction retrieval.
+  * dense: SentenceTransformer encode + dot-product top-k.
 
 Run after stage2:
+    # ColBERT
     uv run python scripts/eval/run_real_corpus.py \\
-        --model runs/base_stage2/final \\
+        --arch colbert --model runs/base_stage2/final \\
         --corpus data/processed/private/passages/real_annotated_500.json \\
         --index-dir runs/base_stage2/eval_index
+
+    # Dense
+    uv run python scripts/eval/run_real_corpus.py \\
+        --arch dense --model runs/dense_large_stage2/final \\
+        --corpus data/processed/private/passages/real_annotated_500.json
 """
 
 from __future__ import annotations
@@ -24,14 +34,18 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from medcolbert.eval.real_corpus import (  # noqa: E402
     load_dev_queries,
     load_real_corpus,
+    run_dense_real_corpus_eval,
     run_real_corpus_eval,
 )
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="MedColBERT real-corpus retrieval eval")
+    p.add_argument("--arch", choices=["colbert", "dense"], default="colbert",
+                   help="Model architecture: colbert (PyLate PLAID) or dense "
+                        "(SentenceTransformer encode + dot-product).")
     p.add_argument("--model", default=None,
-                   help="Path/Hub id of the trained ColBERT model "
+                   help="Path/Hub id of the trained model "
                         "(required unless --dev-rows-only).")
     p.add_argument(
         "--corpus",
@@ -116,22 +130,32 @@ def main() -> None:
     else:
         dev_rows = None
 
-    metrics = run_real_corpus_eval(
-        model_path=args.model,
-        corpus_path=corpus_path,
-        index_dir=REPO_ROOT / args.index_dir,
-        index_name=args.index_name,
-        dev_rows=dev_rows,
-        k=args.k,
-        batch_size=args.batch_size,
-        override_index=not args.no_override_index,
-    )
+    if args.arch == "dense":
+        metrics = run_dense_real_corpus_eval(
+            model_path=args.model,
+            corpus_path=corpus_path,
+            dev_rows=dev_rows,
+            k=args.k,
+            encode_batch_size=args.batch_size,
+        )
+    else:
+        metrics = run_real_corpus_eval(
+            model_path=args.model,
+            corpus_path=corpus_path,
+            index_dir=REPO_ROOT / args.index_dir,
+            index_name=args.index_name,
+            dev_rows=dev_rows,
+            k=args.k,
+            batch_size=args.batch_size,
+            override_index=not args.no_override_index,
+        )
     d = metrics.as_dict()
-    print("[eval] real-corpus retrieval metrics:")
+    print(f"[eval] real-corpus retrieval metrics (arch={args.arch}):")
     for k, v in d.items():
         if k != "per_query":
             print(f"  {k}: {v}")
     print("[eval] BM25 baseline Recall@100 ≈ 0.63 — model must beat this.")
+    print("[eval] ColBERT base gate: Recall@100=0.971, MRR@10=0.714, nDCG@10=0.754.")
 
     if args.out:
         out_path = Path(args.out)

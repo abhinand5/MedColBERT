@@ -1,12 +1,16 @@
 """Real-corpus retrieval evaluation — the train-on-synthetic quality gate.
 
-Builds a ColBERT PLAID index over the real PubMed corpus, retrieves the held-out
-dev queries, and measures MRR@10, Recall@100, nDCG@10 against the known
-positive passage ids. The BM25 baseline (Recall@100 ≈ 0.63) lives in the dev
-dataset; the trained model must beat it.
+Builds an index over the real PubMed corpus, retrieves the held-out dev
+queries, and measures MRR@10, Recall@100, nDCG@10 against the known positive
+passage ids. The BM25 baseline (Recall@100 ≈ 0.63) lives in the dev dataset;
+the trained model must beat it.
 
-Metric functions are pure and unit-tested; the retrieval runner requires a
-loaded ColBERT model and the corpus on disk.
+Two retrieval backends share the same pure metric functions:
+  * ColBERT (late interaction) via a PyLate PLAID index.
+  * Dense (single-vector) via SentenceTransformer encode + dot-product top-k.
+
+Metric functions are pure and unit-tested; the retrieval runners require a
+loaded model and the corpus on disk.
 """
 
 from __future__ import annotations
@@ -265,5 +269,117 @@ def run_real_corpus_eval(
     results = retriever.retrieve(queries_embeddings=q_embs, k=k)
 
     per_query_ranked = [[hit["id"] for hit in hits] for hits in results]
+    per_query_relevant = [[r["positive_passage_id"]] for r in dev_rows]
+    return aggregate_metrics(per_query_ranked, per_query_relevant)
+
+
+# ─── Dense retrieval runner (SentenceTransformer) ─────────────────────────────
+
+
+def dense_topk(
+    query_emb,
+    corpus_emb,
+    doc_ids: list[str],
+    k: int = 100,
+    batch_size: int = 256,
+) -> list[list[str]]:
+    """Rank corpus ``doc_ids`` by dot-product similarity to each query.
+
+    Pure over tensors — no model or file access — so it is unit-testable. With
+    L2-normalised embeddings (the default in :func:`run_dense_real_corpus_eval`)
+    the dot product is cosine similarity.
+
+    Args:
+        query_emb: ``(n_queries, d)`` embeddings (torch tensor / numpy, any device).
+        corpus_emb: ``(n_corpus, d)`` embeddings (torch tensor / numpy, any device).
+        doc_ids: corpus id per row, length ``n_corpus``.
+        k: top-k per query; clamped to ``n_corpus`` if larger.
+        batch_size: query batch size for the matmul (memory control).
+
+    Returns:
+        List of ranked doc-id lists (one per query, length ``min(k, n_corpus)``).
+    """
+    import torch
+
+    def _stack(x):
+        # sentence-transformers 5.x encode(convert_to_numpy=False) returns a
+        # list of 1-D tensors (one per text), not a stacked 2-D tensor.
+        if isinstance(x, (list, tuple)):
+            return torch.stack([torch.as_tensor(t) for t in x])
+        return torch.as_tensor(x)
+
+    query_emb = _stack(query_emb)
+    corpus_emb = _stack(corpus_emb)
+    if query_emb.dim() != 2 or corpus_emb.dim() != 2:
+        raise ValueError(
+            f"expected 2-D embeddings, got query {query_emb.dim()}D / "
+            f"corpus {corpus_emb.dim()}D"
+        )
+    if len(doc_ids) != corpus_emb.shape[0]:
+        raise ValueError(
+            f"length mismatch: {len(doc_ids)} doc_ids vs "
+            f"{corpus_emb.shape[0]} corpus rows"
+        )
+    if query_emb.shape[1] != corpus_emb.shape[1]:
+        raise ValueError(
+            f"dim mismatch: query {query_emb.shape[1]} vs corpus "
+            f"{corpus_emb.shape[1]}"
+        )
+
+    corpus_emb = corpus_emb.to(query_emb.device)
+    kk = min(k, corpus_emb.shape[0])
+    ranked: list[list[str]] = []
+    for i in range(0, len(query_emb), batch_size):
+        q_batch = query_emb[i : i + batch_size]
+        scores = q_batch @ corpus_emb.T  # (b, n_corpus)
+        _, idx = torch.topk(scores, k=kk, dim=1)
+        for row in idx.tolist():
+            ranked.append([doc_ids[j] for j in row])
+    return ranked
+
+
+def run_dense_real_corpus_eval(
+    model_path: str,
+    corpus_path: Path | str,
+    dev_rows: list[dict[str, Any]] | None = None,
+    k: int = 100,
+    encode_batch_size: int = 64,
+    hf_token: str | None = None,
+    normalize: bool = True,
+) -> RetrievalMetrics:
+    """Dense real-corpus eval: SentenceTransformer encode + dot-product top-k.
+
+    Mirrors :func:`run_real_corpus_eval` for single-vector dense models. Encodes
+    the corpus and queries with a ``SentenceTransformer``, ranks by cosine
+    (L2-normalised dot-product), and reuses :func:`aggregate_metrics` so the
+    numbers are directly comparable to the ColBERT gate. No PLAID index is
+    built; the corpus is held in memory as a dense matrix.
+    """
+    from sentence_transformers import SentenceTransformer
+
+    corpus = load_real_corpus(corpus_path)
+    if dev_rows is None:
+        dev_rows = load_dev_queries(hf_token=hf_token)
+
+    model = SentenceTransformer(model_path)
+    doc_ids = [str(r["passage_id"]) for r in corpus]
+    doc_texts = [r["text"] for r in corpus]
+    corpus_emb = model.encode(
+        doc_texts,
+        batch_size=encode_batch_size,
+        show_progress_bar=True,
+        convert_to_numpy=False,
+        normalize_embeddings=normalize,
+    )
+    queries = [r["query"] for r in dev_rows]
+    q_emb = model.encode(
+        queries,
+        batch_size=encode_batch_size,
+        show_progress_bar=True,
+        convert_to_numpy=False,
+        normalize_embeddings=normalize,
+    )
+
+    per_query_ranked = dense_topk(q_emb, corpus_emb, doc_ids, k=k)
     per_query_relevant = [[r["positive_passage_id"]] for r in dev_rows]
     return aggregate_metrics(per_query_ranked, per_query_relevant)
