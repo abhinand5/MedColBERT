@@ -1,5 +1,11 @@
 # MedColBERT Goals
 
+> **Status (2026-10-06):** v1 models are below BM25 on public benchmarks — see
+> [docs/v1-public-eval.md](docs/v1-public-eval.md). The retrieval track restarts under
+> [docs/plans/v2-retrieval-plan.md](docs/plans/v2-retrieval-plan.md), after the
+> MedDecide program (`abhinand5/MedDecide`) can serve as the relevance judge. The phase
+> plan below is historical context for v1.
+
 This file is the phase index for MedColBERT. Read [AGENTS.md](AGENTS.md)
 first, then execute phases in order. The project is organized around
 go/no-go gates, not fixed dates.
